@@ -5,8 +5,11 @@ const { RtcTokenBuilder, RtcRole } = pkg;
 import Call from '../models/Call.js';
 import Rating from '../models/Rating.js';
 import Listener from '../models/Listener.js';
+import User from '../models/User.js';
 import { authenticate } from '../middleware/auth.js';
 import config from '../config/config.js';
+
+const BILLING_RATE_PER_MINUTE = 4;
 
 // POST /api/calls
 // Initiate a new call
@@ -44,12 +47,21 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
+    const wallet = await User.getWallet(req.userId);
+    const availableBalance = parseFloat(wallet.balance || 0);
+    if (availableBalance < BILLING_RATE_PER_MINUTE) {
+      return res.status(402).json({
+        error: 'Insufficient balance',
+        details: `Minimum balance of ₹${BILLING_RATE_PER_MINUTE} is required to start a call`
+      });
+    }
+
     // Create call
     const call = await Call.create({
       caller_id: req.userId,
       listener_id,
       call_type: call_type || 'audio',
-      rate_per_minute: listener.rate_per_minute
+      rate_per_minute: BILLING_RATE_PER_MINUTE
     });
 
     res.status(201).json({
@@ -120,16 +132,36 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
     let additionalData = {};
 
     // Calculate cost if call is completed
-    if (status === 'completed' && duration_seconds) {
-      const cost = Call.calculateCost(duration_seconds, call.rate_per_minute);
+    if (status === 'completed') {
+      const endedAt = new Date();
+      let resolvedDurationSeconds = 0;
+      if (call.started_at) {
+        resolvedDurationSeconds = Math.max(
+          0,
+          Math.round((endedAt.getTime() - new Date(call.started_at).getTime()) / 1000)
+        );
+      } else if (call.created_at) {
+        resolvedDurationSeconds = Math.max(
+          0,
+          Math.round((endedAt.getTime() - new Date(call.created_at).getTime()) / 1000)
+        );
+      } else if (duration_seconds !== undefined) {
+        resolvedDurationSeconds = Math.max(0, Number(duration_seconds) || 0);
+      }
+
+      const totalCost = Call.calculateBillingAmount(
+        resolvedDurationSeconds,
+        BILLING_RATE_PER_MINUTE
+      );
+      const billedMinutes = Call.calculateBillingMinutes(resolvedDurationSeconds);
+
       additionalData = {
-        duration_seconds,
-        total_cost: parseFloat(cost)
+        duration_seconds: resolvedDurationSeconds,
+        total_cost: totalCost
       };
 
-      // Update listener stats
-      const durationMinutes = Math.ceil(duration_seconds / 60);
-      await Listener.incrementCallStats(call.listener_id, durationMinutes);
+      await User.deductBalanceForCall(call.caller_id, totalCost, call.call_id);
+      await Listener.incrementCallStats(call.listener_id, billedMinutes);
     }
 
     const updatedCall = await Call.updateStatus(
@@ -144,6 +176,9 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
     });
   } catch (error) {
     console.error('Update call status error:', error);
+    if (error.code === 'INSUFFICIENT_BALANCE') {
+      return res.status(402).json({ error: 'Insufficient balance to complete billing' });
+    }
     res.status(500).json({ error: 'Failed to update call status' });
   }
 });

@@ -395,36 +395,52 @@ class _CallingState extends State<Calling>
         );
 
       case UserCallState.connected:
-        return Row(
+        return Column(
           key: const ValueKey('connected'),
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: isSmallScreen ? 8 : 10,
-              height: isSmallScreen ? 8 : 10,
-              decoration: BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.green.withOpacity(0.5),
-                    blurRadius: 6,
-                    spreadRadius: 2,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: isSmallScreen ? 8 : 10,
+                  height: isSmallScreen ? 8 : 10,
+                  decoration: BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.green.withOpacity(0.5),
+                        blurRadius: 6,
+                        spreadRadius: 2,
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                SizedBox(width: isSmallScreen ? 8 : 10),
+                Text(
+                  _controller.formattedDuration,
+                  style: TextStyle(
+                    fontSize: durationFontSize,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.green,
+                    letterSpacing: 1,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
             ),
-            SizedBox(width: isSmallScreen ? 8 : 10),
-            Text(
-              _controller.formattedDuration,
-              style: TextStyle(
-                fontSize: durationFontSize,
-                fontWeight: FontWeight.w700,
-                color: Colors.green,
-                letterSpacing: 1,
-                fontFeatures: const [FontFeature.tabularFigures()],
+            if (_controller.billedMinutes > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                _controller.formattedBilledAmount,
+                style: TextStyle(
+                  fontSize: isSmallScreen ? 12 : 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white70,
+                ),
               ),
-            ),
+            ],
           ],
         );
 

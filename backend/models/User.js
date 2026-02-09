@@ -255,6 +255,52 @@ class User {
       client.release();
     }
   }
+
+  static async deductBalanceForCall(user_id, amount, call_id) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `INSERT INTO wallets (user_id, balance)
+         VALUES ($1, 0.0)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [user_id]
+      );
+
+      const walletResult = await client.query(
+        `UPDATE wallets
+         SET balance = balance - $2, updated_at = NOW()
+         WHERE user_id = $1 AND balance >= $2
+         RETURNING *`,
+        [user_id, amount]
+      );
+
+      if (walletResult.rows.length === 0) {
+        const error = new Error('INSUFFICIENT_BALANCE');
+        error.code = 'INSUFFICIENT_BALANCE';
+        throw error;
+      }
+
+      await client.query(
+        `INSERT INTO transactions (
+           user_id, transaction_type, amount, currency, description,
+           status, related_call_id
+         )
+         VALUES ($1, 'debit', $2, 'INR', $3, 'completed', $4)
+         RETURNING *`,
+        [user_id, amount, 'Call charge', call_id]
+      );
+
+      await client.query('COMMIT');
+      return walletResult.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 export default User;

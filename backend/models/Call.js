@@ -53,13 +53,13 @@ class Call {
     if (status === 'completed' || status === 'missed' || status === 'cancelled') {
       query += ', ended_at = CURRENT_TIMESTAMP';
       
-      if (additionalData.duration_seconds) {
+      if (additionalData.duration_seconds !== undefined) {
         query += `, duration_seconds = $${paramIndex}`;
         values.splice(2, 0, additionalData.duration_seconds);
         paramIndex++;
       }
       
-      if (additionalData.total_cost) {
+      if (additionalData.total_cost !== undefined) {
         query += `, total_cost = $${paramIndex}`;
         values.splice(paramIndex - 1, 0, additionalData.total_cost);
       }
@@ -136,10 +136,15 @@ class Call {
     return result.rows;
   }
 
-  // Calculate call cost
-  static calculateCost(duration_seconds, rate_per_minute) {
-    const minutes = Math.ceil(duration_seconds / 60);
-    return (minutes * rate_per_minute).toFixed(2);
+  static calculateBillingMinutes(duration_seconds) {
+    const seconds = Math.max(0, Math.floor(Number(duration_seconds) || 0));
+    // Billing rounds up to the next full minute so any partial minute counts as a full minute.
+    return Math.max(1, Math.ceil(seconds / 60));
+  }
+
+  static calculateBillingAmount(duration_seconds, rate_per_minute = 4) {
+    const minutes = this.calculateBillingMinutes(duration_seconds);
+    return Number((minutes * rate_per_minute).toFixed(2));
   }
 }
 

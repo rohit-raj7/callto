@@ -17,6 +17,7 @@ enum UserCallState { calling, connecting, connected, ended }
 /// Controller that owns all call logic for the user-side calling screen.
 /// Widget only listens and renders — zero business logic in the UI.
 class UserCallController extends ChangeNotifier {
+  static const int billingRatePerMinute = 4;
   // ── Constructor params ──
   final String callerName;
   final String callerAvatar;
@@ -83,6 +84,15 @@ class UserCallController extends ChangeNotifier {
     final secs = (_callDuration % 60).toString().padLeft(2, '0');
     return '$mins:$secs';
   }
+
+  int get billedMinutes {
+    if (_callDuration <= 0) return 0;
+    return ((_callDuration + 59) ~/ 60);
+  }
+
+  int get billedAmount => billedMinutes * billingRatePerMinute;
+
+  String get formattedBilledAmount => '₹$billedAmount';
 
   String get statusText {
     if (_connectionError != null) return _connectionError!;
