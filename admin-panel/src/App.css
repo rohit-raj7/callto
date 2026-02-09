@@ -1,0 +1,265 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+/* Layout styles */
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 200px;
+  background: #f4f4f4;
+  padding: 1rem;
+  border-right: 1px solid #ccc;
+}
+
+.sidebar nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar nav a, .sidebar nav button {
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+  text-decoration: none;
+  color: #333;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sidebar nav a:hover, .sidebar nav button:hover {
+  background: #e0e0e0;
+}
+
+.main-content {
+  flex: 1;
+  padding: 2rem;
+}
+
+
+/* Management styles */
+.users-management, .listeners-management {
+  padding: 1rem;
+}
+
+.filters {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.filters input, .filters select {
+  padding: 0.5rem;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+th {
+  background: #f4f4f4;
+}
+
+button {
+  margin: 0 0.25rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+/* Badge styles */
+.badge {
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  font-weight: bold;
+}
+
+.badge.admin {
+  background: #007bff;
+  color: white;
+}
+
+.badge.user {
+  background: #28a745;
+  color: white;
+}
+
+.badge.active {
+  background: #28a745;
+  color: white;
+}
+
+.badge.inactive {
+  background: #dc3545;
+  color: white;
+}
+
+.badge.online {
+  background: #28a745;
+  color: white;
+}
+
+.badge.offline {
+  background: #6c757d;
+  color: white;
+}
+
+/* Modal styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 2rem;
+  border-radius: 8px;
+  width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.modal-content.confirmation {
+  width: 400px;
+}
+
+.modal-content h2 {
+  margin-top: 0;
+}
+
+.modal-content form {
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-content label {
+  margin-bottom: 1rem;
+}
+
+.modal-content input, .modal-content textarea, .modal-content select {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.danger {
+  background: #dc3545;
+  color: white;
+}
+
+/* Loading and error styles */
+.loading, .error {
+  text-align: center;
+  padding: 2rem;
+  font-size: 1.2rem;
+}
+
+.error {
+  color: #dc3545;
+}
+
+/* Listener profile styles */
+.listener-profile {
+  padding: 1rem;
+}
+
+.profile-card {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.profile-image {
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.profile-details {
+  flex: 1;
+}
+
+.profile-details h2 {
+  margin-top: 0;
+}
+
+.profile-details p {
+  margin: 0.5rem 0;
+}
+
+/* Navbar styles */
+nav {
+  display: flex;
+  justify-content: space-between;
+  padding: 1rem;
+  background: #f0f0f0;
+  margin-bottom: 2rem;
+}
+
+nav a {
+  margin: 0 1rem;
+  text-decoration: none;
+  color: #333;
+}
+
+nav button {
+  background: #dc3545;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+}

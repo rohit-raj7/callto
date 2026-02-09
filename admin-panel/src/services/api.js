@@ -1,0 +1,91 @@
+import axios from 'axios';
+
+const resolvedBase =
+  typeof import.meta.env.VITE_API_BASE_URL === 'string' && import.meta.env.VITE_API_BASE_URL.length > 0
+    ? import.meta.env.VITE_API_BASE_URL
+    // : 'https://call-to.onrender.com/api';
+    : 'http://localhost:3002/api';
+const localFallbacks = [
+  'http://localhost:3002/api',
+  'http://127.0.0.1:3002/api'
+];
+const fallbackBases = [resolvedBase, ...localFallbacks.filter((b) => b !== resolvedBase)];
+const api = axios.create({ baseURL: resolvedBase });
+
+// Request interceptor to add Authorization header
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('adminToken');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor to handle errors
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    const isNetworkError = error.code === 'ERR_NETWORK';
+    const isNotFoundOutbox =
+      error.response?.status === 404 && config && typeof config.url === 'string' && /\/notifications\/outbox/.test(config.url);
+    if ((isNetworkError || isNotFoundOutbox) && config && !config.__retryWithFallback) {
+      const baseBefore = config.baseURL || api.defaults.baseURL;
+      const startIndex =
+        fallbackBases.indexOf(baseBefore) !== -1 ? fallbackBases.indexOf(baseBefore) : fallbackBases.indexOf(api.defaults.baseURL);
+      for (let i = startIndex + 1; i < fallbackBases.length; i++) {
+        api.defaults.baseURL = fallbackBases[i];
+        if (config.baseURL) delete config.baseURL;
+        if (typeof config.url === 'string' && /^https?:\/\//i.test(config.url)) {
+          try {
+            const u = new URL(config.url);
+            config.url = `${u.pathname}${u.search}${u.hash}`;
+          } catch {
+            void 0;
+          }
+        }
+        config.__retryWithFallback = true;
+        try {
+          return await api.request(config);
+        } catch (e) {
+          console.warn('API fallback failed', e);
+        }
+      }
+    }
+    if (error.response?.status === 401) {
+      localStorage.removeItem('adminToken');
+      window.location.href = '/admin/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+// User methods
+export const getUsers = () => api.get('/users');
+export const getUserById = (user_id) => api.get(`/users/${user_id}`);
+export const updateUser = (user_id, payload) => api.put(`/users/${user_id}`, payload);
+export const deleteUser = (user_id) => api.delete(`/users/${user_id}`);
+
+// Listener methods
+export const getListeners = () => api.get('/listeners');
+export const getListenerById = (listener_id) => api.get(`/listeners/${listener_id}`);
+export const updateListener = (listener_id, payload) => api.put(`/listeners/${listener_id}`, payload);
+export const deleteListener = (listener_id) => api.delete(`/listeners/${listener_id}`);
+
+// Admin methods
+export const getAdminListeners = () => api.get('/admin/listeners');
+export const getContactMessages = (params = {}) => api.get('/admin/contact-messages', { params });
+export const getDeleteRequests = (params = {}) => api.get('/admin/delete-requests', { params });
+export const deleteDeleteRequest = (request_id) => api.delete(`/admin/delete-requests/${request_id}`);
+export const updateListenerVerificationStatus = (listener_id, status) => 
+  api.put(`/admin/listeners/${listener_id}/verification-status`, { status });
+export const getOutbox = (params = {}) => api.get('/notifications/outbox', { params });
+export const updateOutbox = (id, payload) => api.put(`/notifications/outbox/${id}`, payload);
+export const deleteOutbox = (id) => api.delete(`/notifications/outbox/${id}`);
+
+export default api;
