@@ -66,6 +66,16 @@ router.post('/', authenticate, async (req, res) => {
       });
     }
 
+    // BUSY CHECK: Block calls to listeners already in an active call
+    if (listener.is_busy) {
+      console.log(`[CALLS] Listener ${listener.listener_id} is BUSY — rejecting call`);
+      return res.status(409).json({
+        error: 'Listener is busy',
+        status: 'busy',
+        details: 'This listener is currently on another call. Please try again later.'
+      });
+    }
+
     const userRate = Number(listener.user_rate_per_min || 0);
     if (!Number.isFinite(userRate) || userRate <= 0) {
       return res.status(500).json({ error: 'Listener rate is invalid' });
@@ -164,6 +174,9 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
         await Listener.incrementCallStats(call.listener_id, billing.minutes);
       }
 
+      // BUSY: Clear busy when call completes
+      try { await Listener.clearBusy(call.listener_id); } catch (e) { console.error('[CALLS] clearBusy error:', e.message); }
+
       const updatedCall = await Call.findById(req.params.call_id);
       return res.json({
         message: 'Call status updated',
@@ -174,6 +187,13 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
           durationSeconds: resolvedDurationSeconds
         }
       });
+    }
+
+    // BUSY: Set busy when call becomes ongoing, clear on terminal states
+    if (status === 'ongoing') {
+      try { await Listener.setBusy(call.listener_id); } catch (e) { console.error('[CALLS] setBusy error:', e.message); }
+    } else if (['rejected', 'missed', 'cancelled'].includes(status)) {
+      try { await Listener.clearBusy(call.listener_id); } catch (e) { console.error('[CALLS] clearBusy error:', e.message); }
     }
 
     const updatedCall = await Call.updateStatus(req.params.call_id, status);
@@ -221,9 +241,23 @@ router.post('/end', authenticate, async (req, res) => {
 
     if (!billing.alreadyBilled) {
       await Listener.incrementCallStats(call.listener_id, billing.minutes);
+
+      // Mark offer as used after the user's first successful call
+      try {
+        const caller = await User.findById(call.caller_id);
+        if (caller && caller.is_first_time_user && !caller.offer_used) {
+          await User.markOfferUsed(call.caller_id);
+          console.log(`[CALL] Marked offer_used=true for user ${call.caller_id}`);
+        }
+      } catch (offerErr) {
+        console.error('[CALL] Failed to mark offer used:', offerErr.message);
+      }
     }
 
     const updatedCall = await Call.findById(callId);
+
+    // BUSY: Clear busy when call ends
+    try { await Listener.clearBusy(call.listener_id); } catch (e) { console.error('[CALLS] clearBusy error:', e.message); }
 
     res.json({
       message: 'Call ended',
@@ -377,10 +411,20 @@ router.post('/random', authenticate, async (req, res) => {
     const listener = listeners[0];
 
     if (!listener.is_available || !listener.is_online) {
-      console.log(`[CALLS] Listener ${listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
+      console.log(`[CALLS] Listener ${listener.listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
       return res.status(400).json({ 
         error: 'Listener is not available',
         details: { is_available: listener.is_available, is_online: listener.is_online }
+      });
+    }
+
+    // BUSY CHECK: getRandomAvailable already filters busy, but guard against race condition
+    if (listener.is_busy) {
+      console.log(`[CALLS] Random listener ${listener.listener_id} is BUSY — rejecting`);
+      return res.status(409).json({
+        error: 'Listener is busy',
+        status: 'busy',
+        details: 'Selected listener is currently on another call. Please try again.'
       });
     }
 

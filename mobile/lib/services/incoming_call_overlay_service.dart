@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'socket_service.dart';
 import 'call_service.dart';
 import '../listener/actions/calling.dart';
@@ -12,9 +13,19 @@ class IncomingCallOverlayService {
 
   final SocketService _socketService = SocketService();
   StreamSubscription<IncomingCall>? _subscription;
+  StreamSubscription<Map<String, dynamic>>? _callEndedSubscription;
   OverlayEntry? _overlayEntry;
   BuildContext? _context;
   bool _isInitialized = false;
+  
+  // ── Ringtone ──
+  final AudioPlayer _ringtonePlayer = AudioPlayer();
+  bool _isRinging = false;
+  
+  // ── Active call flag ──
+  /// True when the listener is already on an active call.
+  /// New incoming calls are silently rejected while this is true.
+  bool _isInActiveCall = false;
   
   // Track incoming calls for the list view
   final List<IncomingCall> _incomingCalls = [];
@@ -60,22 +71,100 @@ class IncomingCallOverlayService {
       print('IncomingCallOverlayService: Received call from ${call.callerName}');
       _handleIncomingCall(call);
     });
+
+    // Subscribe to call:ended — if caller cancels before answer, remove from queue
+    _callEndedSubscription = _socketService.onCallEnded.listen((data) {
+      final callId = data['callId']?.toString();
+      final reason = data['reason']?.toString() ?? '';
+      if (callId != null && callId.isNotEmpty) {
+        _handleCallerCancelled(callId, reason);
+      }
+    });
     
     print('IncomingCallOverlayService initialized');
   }
   
   void _handleIncomingCall(IncomingCall call) {
+    // If listener is already on an active call, silently reject
+    if (_isInActiveCall) {
+      print('IncomingCallOverlayService: Ignoring incoming call ${call.callId} — already in active call');
+      // Auto-reject so the caller gets immediate feedback
+      _socketService.rejectCall(
+        callId: call.callId,
+        callerId: call.callerId,
+      );
+      CallService().updateCallStatus(
+        callId: call.callId,
+        status: 'missed',
+      );
+      return;
+    }
     
     if (!_incomingCalls.any((c) => c.callId == call.callId)) {
       _incomingCalls.add(call);
       _callsController.add(List.from(_incomingCalls));
       print('IncomingCallOverlayService: Added call ${call.callId} to list (${_incomingCalls.length} active)');
+      
+      // Start ringtone when first incoming call arrives
+      _startRingtone();
     }
+  }
+
+  /// Called when we receive a call:ended socket event.
+  /// If the callId matches a pending incoming call, remove it (caller cancelled).
+  void _handleCallerCancelled(String callId, String reason) {
+    final hadCall = _incomingCalls.any((c) => c.callId == callId);
+    if (!hadCall) return; // Not a pending incoming call we're tracking
+
+    print('IncomingCallOverlayService: Caller cancelled call $callId (reason: $reason) — removing from queue');
+
+    _incomingCalls.removeWhere((c) => c.callId == callId);
+    _callsController.add(List.from(_incomingCalls));
+    _stopRingtoneIfEmpty();
+    _removeOverlay();
+
+    // Notify main.dart to close its dialog if showing this call
+    _callHandledController.add(callId);
+  }
+
+  // ── Ringtone ──
+
+  /// Play sample.mp3 in a loop until accept/reject/timeout
+  Future<void> _startRingtone() async {
+    if (_isRinging) return; // already playing
+    _isRinging = true;
+    try {
+      await _ringtonePlayer.setReleaseMode(ReleaseMode.loop);
+      await _ringtonePlayer.play(AssetSource('voice/sample.mp3'));
+      print('IncomingCallOverlayService: Ringtone started');
+    } catch (e) {
+      print('IncomingCallOverlayService: Ringtone error: $e');
+      _isRinging = false;
+    }
+  }
+
+  /// Stop ringtone (only when no pending incoming calls remain)
+  void _stopRingtoneIfEmpty() {
+    if (_incomingCalls.isEmpty) {
+      _stopRingtone();
+    }
+  }
+
+  /// Force-stop ringtone immediately
+  void _stopRingtone() {
+    if (!_isRinging) return;
+    _isRinging = false;
+    try {
+      _ringtonePlayer.stop();
+      print('IncomingCallOverlayService: Ringtone stopped');
+    } catch (_) {}
   }
 
   /// Call this when listener goes offline to clear overlays and calls
   void forceOfflineCleanup() {
     _removeOverlay();
+    _stopRingtone();
+    _isInActiveCall = false;
     _incomingCalls.clear();
     _callsController.add(List.from(_incomingCalls));
   }
@@ -98,7 +187,12 @@ class IncomingCallOverlayService {
   void fullDispose() {
     _subscription?.cancel();
     _subscription = null;
+    _callEndedSubscription?.cancel();
+    _callEndedSubscription = null;
     _removeOverlay();
+    _stopRingtone();
+    _ringtonePlayer.dispose();
+    _isInActiveCall = false;
     _incomingCalls.clear();
     _isInitialized = false;
     _context = null;
@@ -111,10 +205,12 @@ class IncomingCallOverlayService {
 
   void _acceptCall(IncomingCall call) async {
     _removeOverlay();
+    _isInActiveCall = true;
     
     // Remove from list
     _incomingCalls.removeWhere((c) => c.callId == call.callId);
     _callsController.add(List.from(_incomingCalls));
+    _stopRingtoneIfEmpty();
 
     // ── FIX: Navigate IMMEDIATELY to prevent the 1-second flicker ──
     // Previously, `await callService.updateCallStatus(...)` ran BEFORE
@@ -152,6 +248,7 @@ class IncomingCallOverlayService {
     // Remove from list
     _incomingCalls.removeWhere((c) => c.callId == call.callId);
     _callsController.add(List.from(_incomingCalls));
+    _stopRingtoneIfEmpty();
 
     // Update call status to rejected
     final callService = CallService();
@@ -187,8 +284,15 @@ class IncomingCallOverlayService {
   void removeCallFromList(String callId) {
     _incomingCalls.removeWhere((c) => c.callId == callId);
     _callsController.add(List.from(_incomingCalls));
+    _stopRingtoneIfEmpty();
     // Also notify main.dart
     _callHandledController.add(callId);
+  }
+
+  /// Call this when the active call ends so the listener can receive new calls.
+  void clearActiveCall() {
+    _isInActiveCall = false;
+    print('IncomingCallOverlayService: Active call cleared — ready for new calls');
   }
 }
 

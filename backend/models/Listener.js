@@ -210,6 +210,7 @@ class Listener {
         l.is_available,
         l.verification_status,
         l.user_rate_per_min,
+        COALESCE(l.is_busy, false) as is_busy,
         u.city,
         u.country,
         u.display_name,
@@ -321,6 +322,7 @@ class Listener {
         l.is_available,
         l.verification_status,
         l.user_rate_per_min,
+        COALESCE(l.is_busy, false) as is_busy,
         u.city,
         u.country,
         u.display_name,
@@ -624,6 +626,7 @@ class Listener {
       JOIN users u ON l.user_id = u.user_id
       WHERE l.is_available = TRUE AND u.is_active = TRUE
         AND l.is_active = TRUE
+        AND COALESCE(l.is_busy, false) = FALSE
         AND COALESCE(l.verification_status, 'approved') = 'approved' -- VERIFICATION CHECK: Only show approved listeners
     `;
     const values = [];
@@ -673,6 +676,56 @@ class Listener {
     
     const result = await pool.query(query, [status, isVerified, listener_id]);
     return result.rows[0];
+  }
+
+  // ── Busy status methods ──
+
+  // Set listener busy (call started)
+  static async setBusy(listener_id) {
+    const query = `
+      UPDATE listeners
+      SET is_busy = TRUE, updated_at = CURRENT_TIMESTAMP
+      WHERE listener_id = $1
+      RETURNING listener_id, is_busy
+    `;
+    const result = await pool.query(query, [listener_id]);
+    console.log(`[LISTENER] setBusy: listener ${listener_id} → busy=true`);
+    return result.rows[0];
+  }
+
+  // Clear listener busy (call ended / disconnected)
+  static async clearBusy(listener_id) {
+    const query = `
+      UPDATE listeners
+      SET is_busy = FALSE, updated_at = CURRENT_TIMESTAMP
+      WHERE listener_id = $1
+      RETURNING listener_id, is_busy
+    `;
+    const result = await pool.query(query, [listener_id]);
+    console.log(`[LISTENER] clearBusy: listener ${listener_id} → busy=false`);
+    return result.rows[0];
+  }
+
+  // Clear busy by user_id (for socket disconnect cleanup)
+  static async clearBusyByUserId(user_id) {
+    const query = `
+      UPDATE listeners
+      SET is_busy = FALSE, updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1 AND is_busy = TRUE
+      RETURNING listener_id, is_busy
+    `;
+    const result = await pool.query(query, [user_id]);
+    if (result.rows.length > 0) {
+      console.log(`[LISTENER] clearBusyByUserId: user ${user_id} → busy=false`);
+    }
+    return result.rows[0];
+  }
+
+  // Check if listener is busy
+  static async isBusy(listener_id) {
+    const query = `SELECT is_busy FROM listeners WHERE listener_id = $1`;
+    const result = await pool.query(query, [listener_id]);
+    return result.rows[0]?.is_busy === true;
   }
 
   // Delete listener and all related data

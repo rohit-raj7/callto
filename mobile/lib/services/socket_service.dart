@@ -70,6 +70,7 @@ class SocketService {
     StreamController<Map<String, dynamic>>? _callFailedController;
     StreamController<Map<String, dynamic>>? _callEndedController;
     StreamController<Map<String, dynamic>>? _callConnectedController;
+    StreamController<Map<String, dynamic>>? _callBusyController;
     StreamController<bool>? _connectionStateController;
     StreamController<String>? _userOnlineController;
     StreamController<String>? _userOfflineController;
@@ -94,6 +95,8 @@ class SocketService {
   bool _isConnected = false;
   final Map<String, bool> listenerOnlineMap = {}; // Tracks all listeners' online status
   final StreamController<Map<String, bool>> _listenerStatusController = StreamController.broadcast();
+  final Map<String, bool> listenerBusyMap = {}; // Tracks all listeners' busy status
+  final StreamController<Map<String, bool>> _listenerBusyController = StreamController.broadcast();
   bool _connecting = false;
   
   // Track joined chat rooms
@@ -141,6 +144,11 @@ class SocketService {
   StreamController<Map<String, dynamic>> get _callConnected {
     _callConnectedController ??= StreamController<Map<String, dynamic>>.broadcast();
     return _callConnectedController!;
+  }
+  
+  StreamController<Map<String, dynamic>> get _callBusy {
+    _callBusyController ??= StreamController<Map<String, dynamic>>.broadcast();
+    return _callBusyController!;
   }
   
   StreamController<bool> get _connectionState {
@@ -205,6 +213,7 @@ class SocketService {
   Stream<Map<String, dynamic>> get onCallFailed => _callFailed.stream;
   Stream<Map<String, dynamic>> get onCallEnded => _callEnded.stream;
   Stream<Map<String, dynamic>> get onCallConnected => _callConnected.stream;
+  Stream<Map<String, dynamic>> get onCallBusy => _callBusy.stream;
   Stream<bool> get onConnectionStateChange => _connectionState.stream;
   Stream<String> get onUserOnline => _userOnline.stream;
   Stream<String> get onUserOffline => _userOffline.stream;
@@ -364,11 +373,27 @@ class SocketService {
       final failureData = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
       _callFailed.add(failureData);
     });
+    _socket!.on('call:busy', (data) {
+      _log('Call busy: $data');
+      final busyData = data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data);
+      _callBusy.add(busyData);
+    });
     _socket!.on('call:ended', (data) {
       _callEnded.add(data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data));
     });
     _socket!.on('call:connected', (data) {
       _callConnected.add(data is Map<String, dynamic> ? data : Map<String, dynamic>.from(data));
+    });
+
+    // Listener busy status updates (real-time)
+    _socket!.on('listener_busy_status', (data) {
+      if (data is Map && data['listenerUserId'] != null && data['busy'] != null) {
+        final id = data['listenerUserId'].toString();
+        final busy = data['busy'] == true;
+        listenerBusyMap[id] = busy;
+        _listenerBusyController.add(Map.from(listenerBusyMap));
+        _log('Listener $id busy=$busy');
+      }
     });
 
     // --- CHAT EVENT LISTENERS ---
@@ -511,6 +536,9 @@ class SocketService {
 
   /// For user screens: subscribe to online map
   Stream<Map<String, bool>> get listenerStatusStream => _listenerStatusController.stream;
+
+  /// For user screens: subscribe to busy status map
+  Stream<Map<String, bool>> get listenerBusyStream => _listenerBusyController.stream;
 
   /// For listener screens: check own online
   bool get isListenerOnline => _currentUserId != null && listenerOnlineMap[_currentUserId!] == true;

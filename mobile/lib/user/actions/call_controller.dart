@@ -8,6 +8,7 @@ import '../../services/agora_service.dart';
 import '../../services/agora_api.dart';
 import '../../services/socket_service.dart';
 import '../../services/call_service.dart';
+import '../../services/user_service.dart';
 import 'audio_device_manager.dart';
 
 /// Single source of truth for call state on the USER side.
@@ -46,6 +47,7 @@ class UserCallController extends ChangeNotifier {
   final AgoraService _agoraService = AgoraService();
   final SocketService _socketService = SocketService();
   final CallService _callService = CallService();
+  final UserService _userService = UserService();
 
   // ── Audio ──
   late final AudioPlayer _audioPlayer = AudioPlayer();
@@ -56,6 +58,7 @@ class UserCallController extends ChangeNotifier {
   StreamSubscription? _callConnectedSub;
   StreamSubscription? _callEndedSub;
   StreamSubscription? _callRejectedSub;
+  StreamSubscription? _callBusySub;
 
   // ── State ──
   UserCallState _callState = UserCallState.calling;
@@ -78,6 +81,18 @@ class UserCallController extends ChangeNotifier {
   Timer? _callTimer;
   Timer? _noAnswerTimer;
   bool _disposed = false;
+  bool _isCallEnding = false;
+  Completer<void>? _endCallCompleter;
+
+  /// Reason the call ended (user_end, balance_zero, remote_end, network_drop).
+  String? _endReason;
+  String? get endReason => _endReason;
+
+  /// True once endCall() has been entered (prevents double execution).
+  bool get isCallEnding => _isCallEnding;
+
+  /// Await this future after calling endCall() to wait for full cleanup.
+  Future<void> get endCallFuture => _endCallCompleter?.future ?? Future.value();
 
   CallBillingSummary? _billingSummary;
   CallBillingSummary? get billingSummary => _billingSummary;
@@ -109,7 +124,7 @@ class UserCallController extends ChangeNotifier {
   /// Call once from initState.
   Future<void> initialize() async {
     _setupSocketListeners();
-    await _playRingtone();
+    _playRingtone(); // fire-and-forget — don't block call setup
 
     if (channelName != null) {
       // Backward compatibility: channel already created
@@ -133,10 +148,10 @@ class UserCallController extends ChangeNotifier {
       if (data['code'] == 'LISTENER_OFFLINE') {
         _setError(data['error'] ?? 'Listener is offline');
         Future.delayed(const Duration(seconds: 2), () {
-          if (!_disposed) endCall();
+          if (!_disposed) endCall(reason: 'remote_end');
         });
       } else {
-        endCall();
+        endCall(reason: 'remote_end');
       }
     });
 
@@ -144,7 +159,17 @@ class UserCallController extends ChangeNotifier {
       debugPrint('UserCallController: call rejected');
       _setError('Call was declined');
       Future.delayed(const Duration(seconds: 2), () {
-        if (!_disposed) endCall();
+        if (!_disposed) endCall(reason: 'remote_end');
+      });
+    });
+
+    // Handle call:busy — listener is already on another call
+    _callBusySub = _socketService.onCallBusy.listen((data) {
+      debugPrint('UserCallController: listener is busy');
+      _stopRingtone();
+      _setError('Listener is busy on another call. Please try later.');
+      Future.delayed(const Duration(seconds: 3), () {
+        if (!_disposed) endCall(reason: 'listener_busy');
       });
     });
 
@@ -167,7 +192,7 @@ class UserCallController extends ChangeNotifier {
       
       _stopRingtone();
       Future.delayed(const Duration(seconds: 3), () {
-        if (!_disposed) endCall();
+        if (!_disposed) endCall(reason: 'remote_end');
       });
     });
   }
@@ -202,12 +227,17 @@ class UserCallController extends ChangeNotifier {
   Future<void> _initiateCallAndConnect() async {
     debugPrint('UserCallController: Initiating call to listener...');
 
-    final connected = await _socketService.connect();
+    // 1. Ensure socket is connected & request mic permission in parallel
+    final socketFuture = _socketService.connect();
+    final micFuture = Permission.microphone.request();
+
+    final connected = await socketFuture;
     if (!connected) {
       _setError('Failed to connect. Please try again.');
       return;
     }
 
+    // 2. Create call record via HTTP API
     final callResult = await _callService.initiateCall(
       listenerId: listenerDbId ?? listenerId ?? '',
       callType: 'audio',
@@ -223,6 +253,7 @@ class UserCallController extends ChangeNotifier {
     _callId = callResult.call!.callId;
     debugPrint('UserCallController: Call created with ID: $_callId');
 
+    // 3. IMMEDIATELY notify listener via socket (before Agora setup)
     final targetUserId = listenerId;
     if (targetUserId != null && _callId != null) {
       _socketService.initiateCall(
@@ -236,7 +267,13 @@ class UserCallController extends ChangeNotifier {
       );
     }
 
-    await _initAgora();
+    // 4. Init Agora (mic permission already resolved in parallel)
+    final micStatus = await micFuture;
+    if (!micStatus.isGranted) {
+      _setError('Microphone permission denied');
+      return;
+    }
+    await _initAgoraEngine();
   }
 
   // ── Agora init + join ──
@@ -247,7 +284,11 @@ class UserCallController extends ChangeNotifier {
       _setError('Microphone permission denied');
       return;
     }
+    await _initAgoraEngine();
+  }
 
+  /// Core Agora setup — mic permission must already be granted.
+  Future<void> _initAgoraEngine() async {
     final channel = _callId ?? channelName ??
         'call_${listenerId ?? DateTime.now().millisecondsSinceEpoch}';
     _currentChannelName = channel;
@@ -283,7 +324,7 @@ class UserCallController extends ChangeNotifier {
       },
       onUserOffline: (connection, remoteUid, reason) {
         debugPrint('UserCallController: listener left $remoteUid');
-        endCall();
+        endCall(reason: 'remote_end');
       },
       onError: (err, msg) {
         debugPrint('UserCallController: Agora error $err – $msg');
@@ -303,7 +344,7 @@ class UserCallController extends ChangeNotifier {
             errorMsg = 'Invalid call token. Please try again.';
           }
           _setError(errorMsg);
-          endCall();
+          endCall(reason: 'network_drop');
         }
       },
       onAudioRoutingChanged: (routing) {
@@ -337,7 +378,7 @@ class UserCallController extends ChangeNotifier {
           _setError('No answer');
           _stopRingtone();
           Future.delayed(const Duration(seconds: 2), () {
-            if (!_disposed) endCall();
+            if (!_disposed) endCall(reason: 'remote_end');
           });
         }
       });
@@ -357,47 +398,84 @@ class UserCallController extends ChangeNotifier {
     audioDeviceManager.selectRoute(route);
   }
 
-  /// End the call. Safe to call multiple times.
-  Future<void> endCall() async {
-    if (_callState == UserCallState.ended) return;
+  /// End the call with a reason. Safe to call multiple times.
+  /// Reasons: "user_end", "balance_zero", "remote_end", "network_drop".
+  Future<void> endCall({String reason = 'user_end'}) async {
+    // Guard: prevent duplicate execution
+    if (_isCallEnding || _callState == UserCallState.ended) {
+      debugPrint('[CALL] endCall() skipped – already ending or ended');
+      return;
+    }
+    _isCallEnding = true;
+    _endReason = reason;
+    _endCallCompleter = Completer<void>();
+    debugPrint('[CALL] End call started – reason: $reason');
 
-    final wasConnected = _callState == UserCallState.connected;
-    _transitionTo(UserCallState.ended);
+    try {
+      final wasConnected = _callState == UserCallState.connected;
+      final durationSnapshot = _callDuration;
 
-    // Update backend
-    final cid = _callId ?? _currentChannelName;
-    if (cid != null) {
-      final status = wasConnected || _callDuration > 0 ? 'completed' : 'cancelled';
-      if (status == 'completed') {
-        final result = await _callService.endCall(
-          callId: cid,
-          durationSeconds: _callDuration,
-        );
-        if (result.success && result.summary != null) {
-          _billingSummary = result.summary;
-          notifyListeners();
-        }
-      } else {
-        await _callService.updateCallStatus(
-          callId: cid,
-          status: status,
-          durationSeconds: _callDuration > 0 ? _callDuration : null,
+      // 1. Stop timer & ringtone IMMEDIATELY
+      _callTimer?.cancel();
+      _callTimer = null;
+      _noAnswerTimer?.cancel();
+      _noAnswerTimer = null;
+      _stopRingtone();
+
+      // 2. Transition state → UI shows "Call Ended"
+      _transitionTo(UserCallState.ended);
+
+      // 3. Disconnect Agora FIRST — stops audio instantly for both sides
+      debugPrint('[CALL] Disconnecting Agora engine');
+      await _agoraService.reset();
+
+      // 4. Notify peer via socket IMMEDIATELY
+      // Use _callId (DB call ID) as the primary identifier — _currentChannelName may
+      // be null if the user cancelled before Agora finished initializing.
+      final socketCallId = _callId ?? _currentChannelName;
+      if (listenerId != null && socketCallId != null) {
+        _socketService.endCall(
+          callId: socketCallId,
+          otherUserId: listenerId!,
+          reason: wasConnected ? 'user_ended' : 'caller_cancelled',
         );
       }
-    }
+      if (_currentChannelName != null) {
+        _socketService.leftChannel(channelName: _currentChannelName!);
+      }
 
-    // Clean up Agora
-    await _agoraService.reset();
+      // 5. Update backend (billing / status) — can happen in background
+      debugPrint('[CALL] Updating backend billing');
+      final cid = _callId ?? _currentChannelName;
+      if (cid != null) {
+        final status = wasConnected || durationSnapshot > 0 ? 'completed' : 'cancelled';
+        if (status == 'completed') {
+          final result = await _callService.endCall(
+            callId: cid,
+            durationSeconds: durationSnapshot,
+          );
+          if (result.success && result.summary != null) {
+            _billingSummary = result.summary;
+          }
+        } else {
+          await _callService.updateCallStatus(
+            callId: cid,
+            status: status,
+            durationSeconds: durationSnapshot > 0 ? durationSnapshot : null,
+          );
+        }
+      }
 
-    // Notify peer
-    if (listenerId != null && _currentChannelName != null) {
-      _socketService.endCall(
-        callId: _currentChannelName!,
-        otherUserId: listenerId!,
-      );
-    }
-    if (_currentChannelName != null) {
-      _socketService.leftChannel(channelName: _currentChannelName!);
+      debugPrint('[CALL] Cleanup done');
+    } catch (e) {
+      debugPrint('[CALL] Cleanup error: $e');
+    } finally {
+      // Signal that cleanup is complete
+      if (!_endCallCompleter!.isCompleted) {
+        _endCallCompleter!.complete();
+      }
+      // Notify UI one final time so it can navigate
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -406,7 +484,7 @@ class UserCallController extends ChangeNotifier {
   Future<void> _playRingtone() async {
     try {
       await _audioPlayer.setReleaseMode(ReleaseMode.loop);
-      await _audioPlayer.play(AssetSource('voice/sample.mp3'));
+      await _audioPlayer.play(AssetSource('voice/calling.mp3'));
     } catch (e) {
       debugPrint('UserCallController: ringtone error: $e');
     }
@@ -422,11 +500,33 @@ class UserCallController extends ChangeNotifier {
 
   void _startCallTimer() {
     _callTimer?.cancel();
+    int _balanceCheckCounter = 0;
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (_disposed) return;
+      if (_disposed || _isCallEnding) return;
       _callDuration++;
+
+      // Check balance every 15 seconds to auto-end on zero balance
+      _balanceCheckCounter++;
+      if (_balanceCheckCounter >= 15) {
+        _balanceCheckCounter = 0;
+        _checkBalanceDuringCall();
+      }
+
       notifyListeners();
     });
+  }
+
+  Future<void> _checkBalanceDuringCall() async {
+    if (_isCallEnding || _disposed || _callState != UserCallState.connected) return;
+    try {
+      final walletResult = await _userService.getWallet();
+      if (walletResult.success && walletResult.balance <= 0) {
+        debugPrint('[CALL] Balance exhausted during call – auto-ending');
+        endCall(reason: 'balance_zero');
+      }
+    } catch (e) {
+      debugPrint('[CALL] Balance check error: $e');
+    }
   }
 
   void _setError(String msg) {
@@ -438,7 +538,7 @@ class UserCallController extends ChangeNotifier {
 
   void _scheduleAutoClose() {
     Future.delayed(const Duration(seconds: 3), () {
-      if (!_disposed) endCall();
+      if (!_disposed) endCall(reason: 'remote_end');
     });
   }
 
@@ -450,6 +550,7 @@ class UserCallController extends ChangeNotifier {
     _callConnectedSub?.cancel();
     _callEndedSub?.cancel();
     _callRejectedSub?.cancel();
+    _callBusySub?.cancel();
     _noAnswerTimer?.cancel();
     _callTimer?.cancel();
     _audioPlayer.stop();

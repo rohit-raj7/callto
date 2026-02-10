@@ -138,6 +138,19 @@ const listenerSockets = new Map(); // Map of listenerUserId -> socketId
 const activeChannels = new Map(); // Map of channelName -> Set of userIds in channel
 const lastSeenMap = new Map(); // Map of userId -> timestamp
 const presenceTimeouts = new Map(); // Map of userId -> timeoutId
+const busyListeners = new Map(); // Map of listenerUserId -> callId (in-memory busy tracking)
+const pendingCalls = new Map(); // Map of callId -> { callerId, listenerId, listenerSocketId, createdAt } (tracks pre-answer calls for cancel routing)
+
+// Stale pendingCalls cleanup: remove entries older than 60 seconds
+setInterval(() => {
+  const now = Date.now();
+  for (const [callId, pending] of pendingCalls.entries()) {
+    if (now - pending.createdAt > 60000) {
+      console.log(`[SOCKET] Stale pendingCall ${callId} removed (age: ${Math.round((now - pending.createdAt) / 1000)}s)`);
+      pendingCalls.delete(callId);
+    }
+  }
+}, 30000);
 
 // WhatsApp-style chat state tracking
 const userChatState = new Map(); // Map of userId -> { activelyViewingChatId, appState: 'foreground'|'background' }
@@ -145,6 +158,19 @@ const userChatState = new Map(); // Map of userId -> { activelyViewingChatId, ap
 // Socket.IO connection handler
 io.on('connection', (socket) => {
   console.log(`[SOCKET] Connected: ${socket.id}`);
+
+  // Helper: Clear busy status for a user (checks both parties)
+  function _clearBusyForCall(userId1, userId2) {
+    for (const uid of [userId1, userId2]) {
+      if (uid && busyListeners.has(uid)) {
+        busyListeners.delete(uid);
+        io.emit('listener_busy_status', { listenerUserId: uid, busy: false });
+        console.log(`[SOCKET] _clearBusyForCall: Listener ${uid} marked NOT BUSY`);
+        // Also clear in DB (fire-and-forget)
+        Listener.clearBusyByUserId(uid).catch(e => console.error('[SOCKET] clearBusyByUserId DB error:', e.message));
+      }
+    }
+  }
 
   // 1. IDENTITY & PRESENCE
   
@@ -239,50 +265,71 @@ io.on('connection', (socket) => {
   socket.on('call:initiate', async (data) => {
     const { listenerId, ...callData } = data || {};
     
-    // VERIFICATION CHECK: Ensure listener is approved before allowing call
+    // Check both maps for the listener's socket
+    const listenerSocketId = listenerSockets.get(listenerId) || connectedUsers.get(listenerId);
+    
+    console.log(`[SOCKET] call:initiate: Looking for listener ${listenerId}`);
+    console.log(`[SOCKET] call:initiate: Found socketId: ${listenerSocketId || 'NONE'}`);
+    
+    if (!listenerSocketId) {
+      // Listener is not connected — notify caller immediately
+      console.log(`[SOCKET] call:initiate: ✗ Listener ${listenerId} NOT online (no socket found)`);
+      socket.emit('call:failed', { callId: callData.callId, reason: 'listener_offline' });
+      return;
+    }
+
+    // BUSY CHECK: If listener is already in an active call, notify caller
+    if (busyListeners.has(listenerId)) {
+      console.log(`[SOCKET] call:initiate: ✗ Listener ${listenerId} is BUSY (active call: ${busyListeners.get(listenerId)})`);
+      socket.emit('call:busy', {
+        callId: callData.callId,
+        listenerId,
+        reason: 'listener_busy',
+        message: 'Listener is busy on another call'
+      });
+      return;
+    }
+
+    // Track this pending call so we can route cancel events to listener
+    if (callData.callId) {
+      pendingCalls.set(callData.callId, {
+        callerId: socket.userId,
+        listenerId,
+        listenerSocketId,
+        createdAt: Date.now(),
+      });
+      console.log(`[SOCKET] call:initiate: Tracking pending call ${callData.callId}`);
+    }
+
+    // Forward incoming-call to listener IMMEDIATELY (don't block on DB)
+    io.to(listenerSocketId).emit('incoming-call', callData);
+    console.log(`[SOCKET] call:initiate: ✓ Forwarded to listener ${listenerId} (socket: ${listenerSocketId})`);
+
+    // THEN verify in background — if not approved, cancel the call
     try {
       const listener = await Listener.findByUserId(listenerId);
       if (listener) {
-        const verificationStatus = listener.verification_status || 'approved'; // Backward compatibility
+        const verificationStatus = listener.verification_status || 'approved';
         if (verificationStatus !== 'approved') {
           console.log(`[SOCKET] call:initiate blocked: Listener ${listenerId} not approved (status: ${verificationStatus})`);
+          // Notify caller that call failed
           socket.emit('call:failed', { 
             callId: callData.callId, 
             reason: 'listener_not_approved',
             message: 'Listener not approved yet'
+          });
+          // Also cancel the incoming call on the listener side
+          io.to(listenerSocketId).emit('call:ended', {
+            callId: callData.callId,
+            reason: 'cancelled',
+            code: 'VERIFICATION_FAILED'
           });
           return;
         }
       }
     } catch (err) {
       console.error(`[SOCKET] call:initiate verification check failed:`, err);
-      socket.emit('call:failed', { 
-        callId: callData.callId, 
-        reason: 'verification_check_failed',
-        message: 'Failed to verify listener status'
-      });
-      return;
-    }
-    
-    // Check both maps for the listener's socket
-    // listenerSockets: explicitly registered as listener (listener:join)
-    // connectedUsers: any connected user (user:join)
-    const listenerSocketId = listenerSockets.get(listenerId) || connectedUsers.get(listenerId);
-    
-    console.log(`[SOCKET] call:initiate: Looking for listener ${listenerId}`);
-    console.log(`[SOCKET] call:initiate: listenerSockets has: ${listenerSockets.has(listenerId)}`);
-    console.log(`[SOCKET] call:initiate: connectedUsers has: ${connectedUsers.has(listenerId)}`);
-    console.log(`[SOCKET] call:initiate: Found socketId: ${listenerSocketId || 'NONE'}`);
-    
-    if (listenerSocketId) {
-      // Listener is online - forward the call
-      io.to(listenerSocketId).emit('incoming-call', callData);
-      console.log(`[SOCKET] call:initiate: ✓ Forwarded to listener ${listenerId} (socket: ${listenerSocketId})`);
-    } else {
-      // Listener is not connected
-      console.log(`[SOCKET] call:initiate: ✗ Listener ${listenerId} NOT online (no socket found)`);
-      // Notify the caller that the listener is offline
-      socket.emit('call:failed', { callId: callData.callId, reason: 'listener_offline' });
+      // Don't fail the call for a verification check error — call was already forwarded
     }
   });
 
@@ -290,6 +337,21 @@ io.on('connection', (socket) => {
   socket.on('call:accept', (data) => {
     const { callId, callerId } = data;
     console.log(`[SOCKET] call:accept: Call ${callId} accepted by ${socket.userId}`);
+    
+    // Remove from pending calls — no longer cancellable
+    pendingCalls.delete(callId);
+    
+    // BUSY: Mark listener as busy in memory
+    if (socket.userId) {
+      busyListeners.set(socket.userId, callId);
+      io.emit('listener_busy_status', { listenerUserId: socket.userId, busy: true });
+      console.log(`[SOCKET] call:accept: Listener ${socket.userId} marked BUSY`);
+      // Also set in DB (fire-and-forget)
+      Listener.findByUserId(socket.userId).then(l => {
+        if (l) Listener.setBusy(l.listener_id).catch(e => console.error('[SOCKET] setBusy DB error:', e.message));
+      }).catch(e => console.error('[SOCKET] findByUserId for setBusy error:', e.message));
+    }
+    
     const callerSocketId = connectedUsers.get(callerId);
     if (callerSocketId) {
       io.to(callerSocketId).emit('call:accepted', {
@@ -303,6 +365,10 @@ io.on('connection', (socket) => {
   socket.on('call:reject', (data) => {
     const { callId, callerId } = data;
     console.log(`[SOCKET] call:reject: Call ${callId} rejected by ${socket.userId}`);
+    
+    // Remove from pending calls
+    pendingCalls.delete(callId);
+    
     const callerSocketId = connectedUsers.get(callerId);
     if (callerSocketId) {
       io.to(callerSocketId).emit('call:rejected', {
@@ -341,12 +407,34 @@ io.on('connection', (socket) => {
   socket.on('call:end', (data) => {
     const { callId, otherUserId } = data;
     console.log(`[SOCKET] call:end: Call ${callId} ended by ${socket.userId}`);
+    
+    // BUSY: Clear busy for both parties (whichever is the listener)
+    _clearBusyForCall(socket.userId, otherUserId);
+    
+    // 1. Try direct otherUserId path (for connected calls)
     const otherSocketId = connectedUsers.get(otherUserId);
     if (otherSocketId) {
       io.to(otherSocketId).emit('call:ended', {
         callId,
-        endedBy: socket.userId
+        endedBy: socket.userId,
+        reason: 'caller_cancelled'
       });
+    }
+    
+    // 2. Check pendingCalls — caller cancelled BEFORE listener answered
+    const pending = pendingCalls.get(callId);
+    if (pending) {
+      pendingCalls.delete(callId);
+      // Notify listener via their socket (may differ from otherUserId lookup)
+      const listenerSid = listenerSockets.get(pending.listenerId) || connectedUsers.get(pending.listenerId);
+      if (listenerSid && listenerSid !== otherSocketId) {
+        io.to(listenerSid).emit('call:ended', {
+          callId,
+          endedBy: socket.userId,
+          reason: 'caller_cancelled'
+        });
+      }
+      console.log(`[SOCKET] call:end: Cancelled pending call ${callId}, notified listener ${pending.listenerId}`);
     }
   });
 
@@ -638,10 +726,42 @@ io.on('connection', (socket) => {
       listenerSockets.delete(listenerUserId);
       io.emit('listener_status', { listenerUserId, online: false, timestamp: Date.now() });
       console.log(`[SOCKET] Listener marked offline: ${listenerUserId}`);
+      
+      // BUSY: Clear busy on disconnect (safety net)
+      if (busyListeners.has(listenerUserId)) {
+        busyListeners.delete(listenerUserId);
+        io.emit('listener_busy_status', { listenerUserId, busy: false });
+        console.log(`[SOCKET] Listener ${listenerUserId} busy cleared on disconnect`);
+        Listener.clearBusyByUserId(listenerUserId).catch(e => console.error('[SOCKET] clearBusyByUserId on disconnect error:', e.message));
+      }
     }
 
     // Handle user cleanup and active calls
     if (userId) {
+      // BUSY: Clear busy if this userId is a busy listener (covers both listenerUserId and userId)
+      if (busyListeners.has(userId)) {
+        busyListeners.delete(userId);
+        io.emit('listener_busy_status', { listenerUserId: userId, busy: false });
+        console.log(`[SOCKET] User ${userId} busy cleared on disconnect (userId path)`);
+        Listener.clearBusyByUserId(userId).catch(e => console.error('[SOCKET] clearBusyByUserId on disconnect error:', e.message));
+      }
+
+      // PENDING CALLS: If this user was a caller who disconnected during ringing,
+      // notify the listener and clean up
+      for (const [callId, pending] of pendingCalls.entries()) {
+        if (String(pending.callerId) === String(userId)) {
+          console.log(`[SOCKET] Caller ${userId} disconnected during pending call ${callId}, notifying listener`);
+          if (pending.listenerSocketId) {
+            io.to(pending.listenerSocketId).emit('call:ended', {
+              callId,
+              endedBy: userId,
+              reason: 'caller_disconnected'
+            });
+          }
+          pendingCalls.delete(callId);
+        }
+      }
+
       // Notify others in active channels
       for (const [channelName, users] of activeChannels.entries()) {
         if (users.has(userId)) {
@@ -854,6 +974,20 @@ async function startServer() {
     } catch (err) {
       console.error('❌ Failed to ensure database schema:', err.message);
       process.exit(1);
+    }
+
+    // PRODUCTION SAFETY: Clear all stale is_busy flags on startup.
+    // If the server crashed or restarted, listeners may be stuck as busy.
+    try {
+      const { pool: startupPool } = await import('./db.js');
+      const cleared = await startupPool.query(
+        `UPDATE listeners SET is_busy = FALSE WHERE is_busy = TRUE RETURNING listener_id`
+      );
+      if (cleared.rowCount > 0) {
+        console.log(`🧹 Cleared ${cleared.rowCount} stale busy flag(s) on startup:`, cleared.rows.map(r => r.listener_id));
+      }
+    } catch (err) {
+      console.error('⚠️  Failed to clear stale busy flags:', err.message);
     }
 
     const listenWithFallback = (initialPort, attempts = 8) =>

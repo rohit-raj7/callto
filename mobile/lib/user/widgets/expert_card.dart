@@ -18,6 +18,7 @@ class ExpertCard extends StatefulWidget {
   final String? listenerId;
   final String? listenerUserId; // The user_id for socket communication
   final bool isOnline; // Online status from parent (API + socket)
+  final bool isBusy; // Busy status from parent (API + socket)
 
   const ExpertCard({
     super.key,
@@ -33,6 +34,7 @@ class ExpertCard extends StatefulWidget {
     this.listenerId,
     this.listenerUserId,
     this.isOnline = false,
+    this.isBusy = false,
   });
 
   @override
@@ -44,8 +46,10 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
   bool isPlaying = false;
   late AnimationController _pulseController;
   bool isListenerOnline = false; // Track listener online status
+  bool isListenerBusy = false; // Track listener busy status
   StreamSubscription<Map<String, bool>>? _onlineSubscription;
   StreamSubscription<Map<String, bool>>? _offlineSubscription;
+  StreamSubscription<Map<String, bool>>? _busySubscription;
 
   @override
   void initState() {
@@ -54,12 +58,17 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
     
     // Initialize online status from parent widget (API + socket status)
     isListenerOnline = widget.isOnline;
+    isListenerBusy = widget.isBusy;
     
     // Also check socket map for real-time updates
     final initialMap = SocketService().listenerOnlineMap;
+    final initialBusyMap = SocketService().listenerBusyMap;
     final id = widget.listenerUserId ?? widget.listenerId;
     if (id != null && initialMap.containsKey(id)) {
       isListenerOnline = initialMap[id]!;
+    }
+    if (id != null && initialBusyMap.containsKey(id)) {
+      isListenerBusy = initialBusyMap[id]!;
     }
 
     _pulseController = AnimationController(
@@ -88,6 +97,11 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
     if (widget.isOnline != oldWidget.isOnline) {
       setState(() {
         isListenerOnline = widget.isOnline;
+      });
+    }
+    if (widget.isBusy != oldWidget.isBusy) {
+      setState(() {
+        isListenerBusy = widget.isBusy;
       });
     }
   }
@@ -120,6 +134,18 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
         }
       }
     });
+    // Listen for real-time busy status events
+    _busySubscription = socketService.listenerBusyStream.listen((map) {
+      final id = widget.listenerUserId ?? widget.listenerId;
+      if (id != null && map.containsKey(id)) {
+        final busy = map[id]!;
+        if (mounted) {
+          setState(() {
+            isListenerBusy = busy;
+          });
+        }
+      }
+    });
   }
 
   Future<void> _ensureSocketConnection() async {
@@ -142,6 +168,16 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Listener is offline')),
+        );
+      }
+      return;
+    }
+
+    // BUSY CHECK: Prevent calling a busy listener
+    if (isListenerBusy) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Listener is busy, please try later')),
         );
       }
       return;
@@ -197,6 +233,7 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
     _pulseController.dispose();
     _onlineSubscription?.cancel();
     _offlineSubscription?.cancel();
+    _busySubscription?.cancel();
     super.dispose();
   }
 
@@ -473,31 +510,37 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Call button only
+                  // Call button — shows "Busy" when listener is busy
                   ElevatedButton.icon(
-                    onPressed: isListenerOnline ? _handleCallNow : null,
+                    // Busy → tap shows snackbar; Online → call; Offline → disabled
+                    onPressed: isListenerBusy
+                        ? _handleCallNow
+                        : (isListenerOnline ? _handleCallNow : null),
                     icon: Icon(
-                      Icons.call,
+                      isListenerBusy ? Icons.phone_disabled : Icons.call,
                       size: isSmallScreen ? 14 : 16,
-                      color: Colors.white,
                     ),
                     label: Text(
-                      "Call Now",
+                      isListenerBusy ? "Busy" : "Call Now",
                       style: TextStyle(
-                        color: Colors.white,
                         fontSize: buttonTextSize,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 0.3,
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isListenerOnline ? Colors.pinkAccent : Colors.grey,
+                      backgroundColor: isListenerBusy
+                          ? Colors.orange.shade400
+                          : (isListenerOnline ? Colors.pinkAccent : Colors.grey),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade400,
+                      disabledForegroundColor: Colors.white70,
                       padding: EdgeInsets.symmetric(
                         horizontal: isSmallScreen ? 10 : (isMediumScreen ? 12 : 16),
                         vertical: isSmallScreen ? 8 : 10,
                       ),
-                      elevation: isListenerOnline ? 2 : 0,
-                      shadowColor: isListenerOnline ? Colors.pinkAccent.withOpacity(0.5) : Colors.transparent,
+                      elevation: (isListenerOnline && !isListenerBusy) ? 2 : 0,
+                      shadowColor: (isListenerOnline && !isListenerBusy) ? Colors.pinkAccent.withOpacity(0.5) : Colors.transparent,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),

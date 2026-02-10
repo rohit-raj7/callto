@@ -10,6 +10,7 @@ class Listener {
   final bool isOnline;
   final bool isAvailable;
   final bool isApproved;
+  final bool isBusy;
   final double rating;
   final int totalCalls;
   final int totalMinutes;
@@ -35,6 +36,7 @@ class Listener {
     this.isOnline = false,
     this.isAvailable = true,
     this.isApproved = false,
+    this.isBusy = false,
     this.rating = 0,
     this.totalCalls = 0,
     this.totalMinutes = 0,
@@ -71,6 +73,7 @@ class Listener {
       isOnline: json['is_online'] ?? false,
       isAvailable: json['is_available'] ?? true,
       isApproved: json['is_approved'] ?? false,
+      isBusy: json['is_busy'] ?? false,
       rating: parseDouble(json['rating'] ?? json['average_rating']),
       totalCalls: json['total_calls'] ?? 0,
       totalMinutes: json['total_minutes'] ?? 0,
@@ -117,6 +120,7 @@ class Listener {
       'is_online': isOnline,
       'is_available': isAvailable,
       'is_approved': isApproved,
+      'is_busy': isBusy,
       'rating': rating,
       'total_calls': totalCalls,
       'total_minutes': totalMinutes,

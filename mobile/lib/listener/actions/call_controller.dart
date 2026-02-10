@@ -8,6 +8,7 @@ import '../../services/agora_service.dart';
 import '../../services/agora_api.dart';
 import '../../services/socket_service.dart';
 import '../../services/call_service.dart';
+import '../../services/incoming_call_overlay_service.dart';
 import 'audio_device_manager.dart';
 
 /// Single source of truth for call state.
@@ -274,34 +275,21 @@ class CallController extends ChangeNotifier {
   Future<void> endCall() async {
     if (_callState == CallState.ended) return;
 
-    // Capture state before transitioning (after transition, _callState is ended)
+    // Capture state before transitioning
     final wasConnected = _callState == CallState.connected;
+    final durationSnapshot = _callDuration;
+
+    // 1. Stop timer & audio IMMEDIATELY
+    _callTimer?.cancel();
+    _callTimer = null;
+    _stopAudio();
     _transitionTo(CallState.ended);
 
-    // Update backend
-    final cid = callId ?? _resolvedChannel;
-    if (cid != null) {
-      final status = wasConnected || _callDuration > 0
-          ? 'completed'
-          : 'cancelled';
-      if (status == 'completed') {
-        await _callService.endCall(
-          callId: cid,
-          durationSeconds: _callDuration,
-        );
-      } else {
-        await _callService.updateCallStatus(
-          callId: cid,
-          status: status,
-          durationSeconds: _callDuration > 0 ? _callDuration : null,
-        );
-      }
-    }
-
-    // Clean up Agora
+    // 2. Disconnect Agora FIRST — stops audio instantly for both sides
+    debugPrint('[CALL-L] Disconnecting Agora engine');
     await _agoraService.reset();
 
-    // Notify peer
+    // 3. Notify peer via socket IMMEDIATELY
     if (callerId != null && _resolvedChannel != null) {
       _socketService.endCall(
         callId: callId ?? _resolvedChannel!,
@@ -311,6 +299,35 @@ class CallController extends ChangeNotifier {
     if (_resolvedChannel != null) {
       _socketService.leftChannel(channelName: _resolvedChannel!);
     }
+
+    // 4. Update backend (billing / status) — can happen after disconnect
+    debugPrint('[CALL-L] Updating backend');
+    final cid = callId ?? _resolvedChannel;
+    if (cid != null) {
+      try {
+        final status = wasConnected || durationSnapshot > 0
+            ? 'completed'
+            : 'cancelled';
+        if (status == 'completed') {
+          await _callService.endCall(
+            callId: cid,
+            durationSeconds: durationSnapshot,
+          );
+        } else {
+          await _callService.updateCallStatus(
+            callId: cid,
+            status: status,
+            durationSeconds: durationSnapshot > 0 ? durationSnapshot : null,
+          );
+        }
+      } catch (e) {
+        debugPrint('[CALL-L] Backend update error: $e');
+      }
+    }
+    debugPrint('[CALL-L] Cleanup done');
+
+    // 5. Clear active call flag so listener can receive new incoming calls
+    IncomingCallOverlayService().clearActiveCall();
   }
 
   // ── Internals ──

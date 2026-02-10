@@ -58,6 +58,7 @@ class _CallingState extends State<Calling>
   bool _handledBalanceError = false;
   bool _hadConnected = false;
   bool _ratingShown = false;
+  bool _isNavigating = false;
 
   @override
   void initState() {
@@ -113,13 +114,33 @@ class _CallingState extends State<Calling>
       return;
     }
 
-    if (_controller.callState == UserCallState.ended) {
-      if (_controller.billingSummary != null && !_summaryShown) {
-        _summaryShown = true;
-        _showBillingSummary(_controller.billingSummary!);
-      } else {
-        _openRatingOrClose();
+    // ── Call ended (remotely or by balance watcher) ──
+    // Only handle navigation here if _handleCallEnd is NOT already driving it.
+    if (_controller.callState == UserCallState.ended && !_isNavigating) {
+      debugPrint('[CALL] _onControllerChanged: ended (reason=${_controller.endReason})');
+      _isNavigating = true;
+
+      // Show balance-zero snackbar before navigating away
+      if (_controller.endReason == 'balance_zero' && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Call ended — wallet balance exhausted'),
+            backgroundColor: Colors.redAccent,
+            duration: Duration(seconds: 3),
+          ),
+        );
       }
+
+      // Wait for cleanup to finish, then navigate
+      _controller.endCallFuture.then((_) {
+        if (!mounted) return;
+        if (_controller.billingSummary != null && !_summaryShown) {
+          _summaryShown = true;
+          _showBillingSummary(_controller.billingSummary!);
+        } else {
+          _openRatingOrClose();
+        }
+      });
     }
 
     setState(() {});
@@ -231,7 +252,37 @@ class _CallingState extends State<Calling>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.detached) {
-      _controller.endCall();
+      _controller.endCall(reason: 'user_end');
+    }
+  }
+
+  /// Unified handler for user-initiated end call (button tap, back press).
+  /// Awaits full cleanup before navigating to rating / pop.
+  Future<void> _handleCallEnd({required String reason}) async {
+    if (_isNavigating) return;
+    _isNavigating = true;
+    debugPrint('[CALL] _handleCallEnd: reason=$reason');
+
+    _controller.endCall(reason: reason);
+    await _controller.endCallFuture;
+
+    if (!mounted) return;
+
+    if (_controller.endReason == 'balance_zero') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Call ended — wallet balance exhausted'),
+          backgroundColor: Colors.redAccent,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+
+    if (_controller.billingSummary != null && !_summaryShown) {
+      _summaryShown = true;
+      _showBillingSummary(_controller.billingSummary!);
+    } else {
+      _openRatingOrClose();
     }
   }
 
@@ -286,11 +337,6 @@ class _CallingState extends State<Calling>
     final isConnected = callState == UserCallState.connected;
     final isEnded = callState == UserCallState.ended;
     final audioMgr = _controller.audioDeviceManager;
-
-    // Responsive sizing based on screen width
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 360;
-    final isMediumScreen = screenWidth < 400;
 
     return Scaffold(
       body: Container(
@@ -358,7 +404,7 @@ class _CallingState extends State<Calling>
             child: IconButton(
               icon: const Icon(Icons.arrow_back_ios_new,
                   color: Colors.white, size: 20),
-              onPressed: () => _controller.endCall(),
+              onPressed: () => _handleCallEnd(reason: 'user_end'),
             ),
           ),
           const Spacer(),
@@ -786,7 +832,7 @@ class _CallingState extends State<Calling>
 
           // ── End call ──
           UserEndCallButton(
-            onTap: isEnded ? () {} : () => _controller.endCall(),
+            onTap: isEnded ? () {} : () => _handleCallEnd(reason: 'user_end'),
           ),
 
           // ── Audio route selector (replaces old speaker toggle) ──

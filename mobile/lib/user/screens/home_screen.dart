@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../widgets/expert_card.dart';
@@ -6,6 +7,7 @@ import '../../services/call_service.dart';
 import '../../services/listener_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/user_service.dart';
 import '../../models/listener_model.dart' as listener_model;
 import '../../models/user_model.dart';
 import '../../ui/skeleton_loading_ui/listener_card_skeleton.dart';
@@ -21,15 +23,23 @@ class _HomeScreenState extends State<HomeScreen> {
   final ListenerService _listenerService = ListenerService();
   final CallService _callService = CallService();
   final StorageService _storageService = StorageService();
+  final UserService _userService = UserService();
   
   String? selectedTopic;
   Map<String, bool> listenerOnlineMap = {};
+  Map<String, bool> listenerBusyMap = {};
   List<listener_model.Listener> _listeners = [];
   List<listener_model.Listener> _filteredListeners = [];
   bool _isLoading = false;
   String? _error;
   RateConfig? _rateConfig;
   bool _isFirstTimeEligible = false;
+  bool _hasCompletedOfferCall = false;
+  int? _offerMinutesLimitOverride;
+
+  // Stream subscriptions for cleanup
+  StreamSubscription<Map<String, bool>>? _onlineStatusSub;
+  StreamSubscription<Map<String, bool>>? _busyStatusSub;
 
   final List<String> topics = [
     'All',
@@ -56,7 +66,7 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     // --- FIX: Listen for real-time status, no default offline ---
-    SocketService().listenerStatusStream.listen((map) {
+    _onlineStatusSub = SocketService().listenerStatusStream.listen((map) {
       if (mounted) {
         setState(() {
           listenerOnlineMap = Map.from(map);
@@ -65,9 +75,46 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     });
+
+    // Listen for real-time busy status updates
+    _busyStatusSub = SocketService().listenerBusyStream.listen((map) {
+      if (mounted) {
+        setState(() {
+          listenerBusyMap = Map.from(map);
+          // Re-filter/sort when busy status changes
+          _filterListeners();
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _onlineStatusSub?.cancel();
+    _busyStatusSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadOfferEligibility() async {
+    // 1) Try fetching fresh profile from backend (updates local storage too)
+    try {
+      final result = await _userService.getProfile();
+      if (result.success && result.user != null) {
+        if (mounted) {
+          setState(() {
+            _isFirstTimeEligible =
+                result.user!.isFirstTimeUser && !result.user!.offerUsed;
+            _offerMinutesLimitOverride = result.user!.offerMinutesLimit;
+          });
+        }
+        await _refreshOfferEligibilityFromCallHistory();
+        return;
+      }
+    } catch (_) {
+      // Backend unreachable — fall back to cached data below
+    }
+
+    // 2) Fallback: read from local storage cache
     try {
       final rawUser = await _storageService.getUserData();
       if (rawUser == null) return;
@@ -78,14 +125,15 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (decoded is Map) {
         payload = decoded.map((key, value) => MapEntry(key.toString(), value));
       }
-
       if (payload == null) return;
       final user = User.fromJson(payload);
       if (mounted) {
         setState(() {
           _isFirstTimeEligible = user.isFirstTimeUser && !user.offerUsed;
+          _offerMinutesLimitOverride = user.offerMinutesLimit;
         });
       }
+      await _refreshOfferEligibilityFromCallHistory();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -105,6 +153,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _rateConfig = result.rateConfig;
           });
         }
+        await _refreshOfferEligibilityFromCallHistory();
         return;
       }
     } catch (e) {
@@ -116,7 +165,47 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _rateConfig = RateConfig.fromJson(cached);
       });
+      await _refreshOfferEligibilityFromCallHistory();
     }
+  }
+
+  Future<void> _refreshOfferEligibilityFromCallHistory() async {
+    if (!mounted || !_isFirstTimeEligible || _hasCompletedOfferCall) return;
+
+    final offerMinutesLimit =
+        _rateConfig?.offerMinutesLimit ?? _offerMinutesLimitOverride;
+
+    try {
+      final result = await _callService.getCallHistory(limit: 100);
+      if (!result.success) return;
+
+      bool hasCompletedOfferCall;
+      if (offerMinutesLimit != null && offerMinutesLimit > 0) {
+        hasCompletedOfferCall = result.calls.any((call) {
+          if (call.status != 'completed') return false;
+          final durationSeconds = call.durationSeconds ?? 0;
+          if (durationSeconds <= 0) return false;
+          final billedMinutes = _billableMinutesFromSeconds(durationSeconds);
+          return billedMinutes >= offerMinutesLimit;
+        });
+      } else {
+        hasCompletedOfferCall =
+            result.calls.any((call) => call.status == 'completed');
+      }
+
+      if (hasCompletedOfferCall && mounted) {
+        setState(() {
+          _hasCompletedOfferCall = true;
+        });
+      }
+    } catch (_) {
+      // Ignore call history failures and keep current eligibility.
+    }
+  }
+
+  int _billableMinutesFromSeconds(int durationSeconds) {
+    if (durationSeconds <= 0) return 0;
+    return (durationSeconds / 60).ceil();
   }
 
   Future<void> _loadListeners() async {
@@ -210,6 +299,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return listener.isOnline;
   }
 
+  /// Check if a listener is busy using both API data and socket status
+  bool _isListenerBusy(listener_model.Listener listener) {
+    final userId = listener.userId;
+    final listenerId = listener.listenerId;
+
+    if (listenerBusyMap.containsKey(userId)) {
+      return listenerBusyMap[userId]!;
+    }
+    if (listenerBusyMap.containsKey(listenerId)) {
+      return listenerBusyMap[listenerId]!;
+    }
+
+    // Fall back to API status
+    return listener.isBusy;
+  }
+
   String _formatOfferAmount(double value) {
     if (value % 1 == 0) {
       return value.toStringAsFixed(0);
@@ -219,7 +324,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String? _buildOfferRateText() {
     final config = _rateConfig;
-    if (config == null || !_isFirstTimeEligible || !config.firstTimeOfferEnabled) {
+    if (config == null ||
+        !_isFirstTimeEligible ||
+        _hasCompletedOfferCall ||
+        !config.firstTimeOfferEnabled) {
       return null;
     }
 
@@ -393,6 +501,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 itemBuilder: (context, index) {
                                   final listener = _filteredListeners[index];
                                   final isOnline = _isListenerOnline(listener);
+                                  final isBusy = _isListenerBusy(listener);
                                   final offerRateText = _buildOfferRateText();
                                   final normalRateText =
                                       '₹${listener.ratePerMinute.toStringAsFixed(0)}/min';
@@ -409,6 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                     listenerId: listener.listenerId,
                                     listenerUserId: listener.userId,
                                     isOnline: isOnline,
+                                    isBusy: isBusy,
                                   );
                                 },
                               ),
