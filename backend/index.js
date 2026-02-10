@@ -7,7 +7,7 @@ import morgan from 'morgan';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import config from './config/config.js';
-import { testConnection, ensureSchema, pool } from './db.js';
+import { testConnection, ensureSchema, pool, getRateConfig } from './db.js';
 // Initialize Express app
 const app = express();
 const server = http.createServer(app);
@@ -28,6 +28,7 @@ import contactRoutes from './routes/contacts.js';
 import notificationsRoutes from './routes/notifications.js';
 import accountRoutes from './routes/account.js';
 import paymentRoutes from './routes/payments.js';
+import ratingRoutes from './routes/ratings.js';
 import User from './models/User.js';
 import Listener from './models/Listener.js'; // Import for verification checks
 import { Chat, Message } from './models/Chat.js';
@@ -97,6 +98,21 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+app.get('/api/config/call-rates', async (req, res) => {
+  try {
+    const rateConfig = await getRateConfig();
+    res.json({
+      normalPerMinuteRate: Number(rateConfig.normal_per_minute_rate),
+      firstTimeOfferEnabled: rateConfig.first_time_offer_enabled === true,
+      offerMinutesLimit: rateConfig.offer_minutes_limit,
+      offerFlatPrice: rateConfig.offer_flat_price
+    });
+  } catch (error) {
+    console.error('Get call rates error:', error);
+    res.status(500).json({ error: 'Failed to fetch call rates' });
+  }
+});
+
 // Mount API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
@@ -108,6 +124,7 @@ app.use('/api/contacts', contactRoutes);
 app.use('/api/notifications', notificationsRoutes);
 app.use('/api/account', accountRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/ratings', ratingRoutes);
 
 // ============================================
 // SOCKET.IO - REAL-TIME FEATURES
@@ -673,9 +690,12 @@ io.on('connection', (socket) => {
 });
 
 async function processNotifications() {
-  const client = await pool.connect();
+  let client;
+  let inTransaction = false;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
+    inTransaction = true;
     const ready = await client.query(`
       SELECT *
       FROM notification_outbox
@@ -772,11 +792,18 @@ async function processNotifications() {
       }
     }
     await client.query('COMMIT');
+    inTransaction = false;
   } catch (e) {
-    await client.query('ROLLBACK');
+    if (client && inTransaction) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {}
+    }
     console.error('processNotifications error:', e.message);
   } finally {
-    client.release();
+    if (client) {
+      client.release();
+    }
   }
 }
 
@@ -861,7 +888,11 @@ async function startServer() {
     console.log(`🔌 Socket.IO ready for connections`);
     console.log(`📊 API endpoints available at http://localhost:${boundPort}/api`);
     console.log('='.repeat(50) + '\n');
-    setInterval(processNotifications, 60 * 1000);
+    setInterval(() => {
+      processNotifications().catch((err) => {
+        console.error('processNotifications fatal error:', err.message);
+      });
+    }, 60 * 1000);
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);

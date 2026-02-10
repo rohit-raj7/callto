@@ -40,33 +40,37 @@ class Call {
 
   // Update call status
   static async updateStatus(call_id, status, additionalData = {}) {
-    let query = 'UPDATE calls SET status = $1';
-    const values = [status, call_id];
-    let paramIndex = 3;
+    const updates = ['status = $1'];
+    const values = [status];
+    let paramIndex = 2;
 
-    // Update started_at when status changes to 'ongoing'
     if (status === 'ongoing') {
-      query += ', started_at = CURRENT_TIMESTAMP';
+      updates.push('started_at = CURRENT_TIMESTAMP');
     }
 
-    // Update ended_at and duration when call completes
     if (status === 'completed' || status === 'missed' || status === 'cancelled') {
-      query += ', ended_at = CURRENT_TIMESTAMP';
-      
-      if (additionalData.duration_seconds !== undefined) {
-        query += `, duration_seconds = $${paramIndex}`;
-        values.splice(2, 0, additionalData.duration_seconds);
+      updates.push('ended_at = CURRENT_TIMESTAMP');
+    }
+
+    const addField = (field, value) => {
+      if (value !== undefined) {
+        updates.push(`${field} = $${paramIndex}`);
+        values.push(value);
         paramIndex++;
       }
-      
-      if (additionalData.total_cost !== undefined) {
-        query += `, total_cost = $${paramIndex}`;
-        values.splice(paramIndex - 1, 0, additionalData.total_cost);
-      }
-    }
+    };
 
-    query += ` WHERE call_id = $2 RETURNING *`;
-    
+    addField('duration_seconds', additionalData.duration_seconds);
+    addField('total_cost', additionalData.total_cost);
+    addField('billed_minutes', additionalData.billed_minutes);
+    addField('rate_per_minute', additionalData.rate_per_minute);
+    addField('offer_applied', additionalData.offer_applied);
+    addField('offer_flat_price', additionalData.offer_flat_price);
+    addField('offer_minutes_limit', additionalData.offer_minutes_limit);
+
+    const query = `UPDATE calls SET ${updates.join(', ')} WHERE call_id = $${paramIndex} RETURNING *`;
+    values.push(call_id);
+
     const result = await pool.query(query, values);
     return result.rows[0];
   }
@@ -142,9 +146,49 @@ class Call {
     return Math.max(1, Math.ceil(seconds / 60));
   }
 
-  static calculateBillingAmount(duration_seconds, rate_per_minute = 4) {
+  static calculateBillingAmount(duration_seconds, rate_per_minute) {
     const minutes = this.calculateBillingMinutes(duration_seconds);
-    return Number((minutes * rate_per_minute).toFixed(2));
+    return Number((minutes * Number(rate_per_minute || 0)).toFixed(2));
+  }
+
+  static calculateCallCharge({
+    duration_seconds,
+    normal_rate_per_minute,
+    listener_rate_per_minute,
+    offer
+  }) {
+    const minutes = this.calculateBillingMinutes(duration_seconds);
+    const normalRate = Number(normal_rate_per_minute || 0);
+    const listenerRate = Number(listener_rate_per_minute || 0);
+
+    // Offer math: apply flat price for the first N minutes, then normal rate for the rest.
+    let userCharge = minutes * normalRate;
+    let offerApplied = false;
+    let offerMinutesLimit = null;
+    let offerFlatPrice = null;
+
+    if (offer && offer.enabled === true) {
+      offerApplied = true;
+      offerMinutesLimit = Number(offer.minutesLimit || 0);
+      offerFlatPrice = Number(offer.flatPrice || 0);
+      if (minutes <= offerMinutesLimit) {
+        userCharge = offerFlatPrice;
+      } else {
+        userCharge = offerFlatPrice + (minutes - offerMinutesLimit) * normalRate;
+      }
+    }
+
+    const listenerEarn = minutes * listenerRate;
+
+    return {
+      minutes,
+      userCharge: Number(userCharge.toFixed(2)),
+      listenerEarn: Number(listenerEarn.toFixed(2)),
+      offerApplied,
+      offerMinutesLimit,
+      offerFlatPrice,
+      normalRate
+    };
   }
 }
 

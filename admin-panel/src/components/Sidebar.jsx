@@ -20,6 +20,8 @@ const Sidebar = () => {
     { id: 'dashboard', label: 'Dashboard', icon: Home, path: '/admin-no-all-call/dashboard', shortcut: 'G D' },
     { id: 'users', label: 'Users', icon: Users, path: '/admin-no-all-call/users', shortcut: 'G U' },
     { id: 'listeners', label: 'Listeners', icon: Headphones, path: '/admin-no-all-call/listeners', shortcut: 'G L' },
+    { id: 'listener-rates', label: 'Listener Rates', icon: Settings, path: '/admin-no-all-call/listener-rates', shortcut: 'G S' },
+    { id: 'call-rate-config', label: 'Call Rate Config', icon: Settings, path: '/admin-no-all-call/call-rate-config', shortcut: 'G O' },
     { id: 'user-contacts', label: 'User Contacts', icon: Contact, path: '/admin-no-all-call/user-contacts', shortcut: 'G C' },
     { id: 'send-notification', label: 'Send Notification', icon: Bell, path: '/admin-no-all-call/send-notification', shortcut: 'G N' },
     { id: 'contact-messages', label: 'Contact Messages', icon: Contact, path: '/admin-no-all-call/contact-messages', shortcut: 'G M' },

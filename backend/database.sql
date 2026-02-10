@@ -28,7 +28,12 @@ CREATE TABLE IF NOT EXISTS users (
     bio TEXT,
     is_verified BOOLEAN DEFAULT FALSE,
     is_active BOOLEAN DEFAULT TRUE,
+    wallet_balance DECIMAL(10, 2) DEFAULT 0.0,
     account_type VARCHAR(20) DEFAULT 'user' CHECK (account_type IN ('user', 'listener', 'both')),
+    is_first_time_user BOOLEAN DEFAULT FALSE,
+    offer_used BOOLEAN DEFAULT FALSE,
+    offer_minutes_limit INTEGER,
+    offer_flat_price DECIMAL(10, 2),
     fcm_token TEXT, -- For push notifications
     last_seen TIMESTAMP, -- Last seen timestamp for presence
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -50,14 +55,20 @@ CREATE TABLE IF NOT EXISTS listeners (
     experiences TEXT[], -- Array of personal experiences: ['Love Failure', 'Job Loss', etc]
     languages TEXT[], -- Array of languages: ['Hindi', 'English', 'Kannada']
     rate_per_minute DECIMAL(10, 2) NOT NULL,
+    user_rate_per_min DECIMAL(10, 2) NOT NULL,
+    listener_payout_per_min DECIMAL(10, 2) NOT NULL,
+    CHECK (listener_payout_per_min <= user_rate_per_min),
     currency VARCHAR(3) DEFAULT 'INR',
     average_rating DECIMAL(3, 2) DEFAULT 0.0,
     total_ratings INTEGER DEFAULT 0,
     total_calls INTEGER DEFAULT 0,
     total_minutes INTEGER DEFAULT 0,
+    total_earning DECIMAL(10, 2) DEFAULT 0.0,
     is_online BOOLEAN DEFAULT FALSE,
+    wallet_balance DECIMAL(10, 2) DEFAULT 0.0,
     last_active_at TIMESTAMP,
     is_available BOOLEAN DEFAULT TRUE,
+    is_active BOOLEAN DEFAULT TRUE,
     is_verified BOOLEAN DEFAULT FALSE,
     verification_status VARCHAR(20) DEFAULT 'pending' CHECK (verification_status IN ('pending', 'approved', 'rejected')),
     voice_verified BOOLEAN DEFAULT FALSE,
@@ -111,6 +122,10 @@ CREATE TABLE IF NOT EXISTS calls (
     duration_seconds INTEGER DEFAULT 0,
     rate_per_minute DECIMAL(10, 2),
     total_cost DECIMAL(10, 2) DEFAULT 0.0,
+    billed_minutes INTEGER,
+    offer_applied BOOLEAN DEFAULT FALSE,
+    offer_flat_price DECIMAL(10, 2),
+    offer_minutes_limit INTEGER,
     is_rated BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -118,6 +133,66 @@ CREATE TABLE IF NOT EXISTS calls (
 -- Index for call history queries
 CREATE INDEX idx_calls_caller ON calls(caller_id, created_at DESC);
 CREATE INDEX idx_calls_listener ON calls(listener_id, created_at DESC);
+
+-- ============================================
+-- CALL RECORDS TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS call_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    call_id UUID REFERENCES calls(call_id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    listener_id UUID REFERENCES listeners(listener_id) ON DELETE SET NULL,
+    minutes INTEGER NOT NULL,
+    user_charge DECIMAL(10, 2) NOT NULL,
+    listener_earn DECIMAL(10, 2) NOT NULL,
+    started_at TIMESTAMP,
+    ended_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_call_records_user ON call_records(user_id, created_at DESC);
+CREATE INDEX idx_call_records_listener ON call_records(listener_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_call_records_call_id ON call_records(call_id) WHERE call_id IS NOT NULL;
+
+-- ============================================
+-- CALL BILLING AUDIT LOG
+-- ============================================
+CREATE TABLE IF NOT EXISTS call_billing_audit (
+    audit_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    call_id UUID REFERENCES calls(call_id) ON DELETE SET NULL,
+    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    listener_id UUID REFERENCES listeners(listener_id) ON DELETE SET NULL,
+    minutes INTEGER NOT NULL,
+    user_charge DECIMAL(10, 2) NOT NULL,
+    listener_earn DECIMAL(10, 2) NOT NULL,
+    user_rate_per_min DECIMAL(10, 2) NOT NULL,
+    listener_payout_per_min DECIMAL(10, 2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_call_billing_audit_created_at ON call_billing_audit(created_at DESC);
+
+-- ============================================
+-- RATE CONFIGURATION TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS rate_config (
+    config_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    normal_per_minute_rate DECIMAL(10, 2) NOT NULL,
+    first_time_offer_enabled BOOLEAN DEFAULT FALSE,
+    offer_minutes_limit INTEGER,
+    offer_flat_price DECIMAL(10, 2),
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS rate_config_audit (
+    audit_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    admin_id UUID REFERENCES admins(admin_id) ON DELETE SET NULL,
+    previous_config JSONB,
+    new_config JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_config_audit_created_at ON rate_config_audit(created_at DESC);
 
 -- ============================================
 -- CHATS TABLE
@@ -204,6 +279,7 @@ CREATE TABLE IF NOT EXISTS ratings (
 
 -- Index for listener ratings
 CREATE INDEX idx_ratings_listener ON ratings(listener_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ratings_call_id ON ratings(call_id);
 
 -- ============================================
 -- TRANSACTIONS/WALLET TABLE
@@ -388,7 +464,7 @@ VALUES
     ('+919876543213', 'manisha@example.com', 'Manisha Shah', 'Manisha', 'Female', 'Ahmedabad', 'India', TRUE, 'listener');
 
 -- Insert sample listeners
-INSERT INTO listeners (user_id, professional_name, age, specialties, languages, rate_per_minute, average_rating, total_ratings, is_online, is_available, is_verified)
+INSERT INTO listeners (user_id, professional_name, age, specialties, languages, rate_per_minute, user_rate_per_min, listener_payout_per_min, average_rating, total_ratings, is_online, is_available, is_verified)
 SELECT 
     user_id,
     display_name,
@@ -404,6 +480,8 @@ SELECT
     END,
     ARRAY['Hindi', 'English'],
     5.00,
+    5.00,
+    1.00,
     CASE 
         WHEN display_name = 'Khushi' THEN 4.4
         WHEN display_name = 'Shrddha' THEN 5.0

@@ -74,6 +74,26 @@ async function testConnection(retries = 3) {
   }
 }
 
+async function getRateConfig() {
+  const result = await pool.query(
+    `SELECT config_id, normal_per_minute_rate, first_time_offer_enabled, offer_minutes_limit, offer_flat_price, updated_at
+     FROM rate_config
+     ORDER BY updated_at DESC
+     LIMIT 1`
+  );
+
+  if (result.rows.length === 0) {
+    const insertResult = await pool.query(
+      `INSERT INTO rate_config (normal_per_minute_rate, first_time_offer_enabled, offer_minutes_limit, offer_flat_price)
+       VALUES (4.00, FALSE, 5, 5.00)
+       RETURNING config_id, normal_per_minute_rate, first_time_offer_enabled, offer_minutes_limit, offer_flat_price, updated_at`
+    );
+    return insertResult.rows[0];
+  }
+
+  return result.rows[0];
+}
+
 // Ensure required columns exist on startup (non-destructive)
 async function ensureSchema() {
   try {
@@ -194,6 +214,11 @@ async function ensureSchema() {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type VARCHAR(20) DEFAULT 'user';
       ALTER TABLE users ADD COLUMN IF NOT EXISTS languages TEXT[];
       ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS is_first_time_user BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS offer_used BOOLEAN DEFAULT FALSE;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS offer_minutes_limit INTEGER;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS offer_flat_price DECIMAL(10, 2);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(10, 2) DEFAULT 0.0;
       
       -- Add listener table columns if they don't exist
       ALTER TABLE listeners ADD COLUMN IF NOT EXISTS original_name VARCHAR(100);
@@ -201,9 +226,106 @@ async function ensureSchema() {
       ALTER TABLE listeners ADD COLUMN IF NOT EXISTS voice_verified BOOLEAN DEFAULT FALSE;
       ALTER TABLE listeners ADD COLUMN IF NOT EXISTS voice_verification_url TEXT;
       ALTER TABLE listeners ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP;
+      ALTER TABLE listeners ADD COLUMN IF NOT EXISTS user_rate_per_min DECIMAL(10, 2);
+      ALTER TABLE listeners ADD COLUMN IF NOT EXISTS listener_payout_per_min DECIMAL(10, 2);
+      ALTER TABLE listeners ADD COLUMN IF NOT EXISTS total_earning DECIMAL(10, 2) DEFAULT 0.0;
+      ALTER TABLE listeners ADD COLUMN IF NOT EXISTS wallet_balance DECIMAL(10, 2) DEFAULT 0.0;
+      ALTER TABLE listeners ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+      
+      ALTER TABLE calls ADD COLUMN IF NOT EXISTS billed_minutes INTEGER;
+      ALTER TABLE calls ADD COLUMN IF NOT EXISTS offer_applied BOOLEAN DEFAULT FALSE;
+      ALTER TABLE calls ADD COLUMN IF NOT EXISTS offer_flat_price DECIMAL(10, 2);
+      ALTER TABLE calls ADD COLUMN IF NOT EXISTS offer_minutes_limit INTEGER;
     `;
     await pool.query(alterSql);
     console.log('✓ Ensured users and listeners table schema');
+
+    const createRateConfigSql = `
+      CREATE TABLE IF NOT EXISTS rate_config (
+        config_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        normal_per_minute_rate DECIMAL(10, 2) NOT NULL,
+        first_time_offer_enabled BOOLEAN DEFAULT FALSE,
+        offer_minutes_limit INTEGER,
+        offer_flat_price DECIMAL(10, 2),
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+    await pool.query(createRateConfigSql);
+
+    const createRateConfigAuditSql = `
+      CREATE TABLE IF NOT EXISTS rate_config_audit (
+        audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        admin_id UUID REFERENCES admins(admin_id) ON DELETE SET NULL,
+        previous_config JSONB,
+        new_config JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_rate_config_audit_created_at ON rate_config_audit(created_at DESC);
+    `;
+    await pool.query(createRateConfigAuditSql);
+
+    await pool.query(`
+      INSERT INTO rate_config (normal_per_minute_rate, first_time_offer_enabled, offer_minutes_limit, offer_flat_price)
+      SELECT 4.00, FALSE, 5, 5.00
+      WHERE NOT EXISTS (SELECT 1 FROM rate_config)
+    `);
+    console.log('✓ Ensured rate_config table and default row');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS call_records (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        call_id UUID REFERENCES calls(call_id) ON DELETE SET NULL,
+        user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE SET NULL,
+        minutes INTEGER NOT NULL,
+        user_charge DECIMAL(10, 2) NOT NULL,
+        listener_earn DECIMAL(10, 2) NOT NULL,
+        started_at TIMESTAMP,
+        ended_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_call_records_call_id
+        ON call_records(call_id) WHERE call_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_call_records_user ON call_records(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_call_records_listener ON call_records(listener_id, created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS call_billing_audit (
+        audit_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        call_id UUID REFERENCES calls(call_id) ON DELETE SET NULL,
+        user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE SET NULL,
+        minutes INTEGER NOT NULL,
+        user_charge DECIMAL(10, 2) NOT NULL,
+        listener_earn DECIMAL(10, 2) NOT NULL,
+        user_rate_per_min DECIMAL(10, 2) NOT NULL,
+        listener_payout_per_min DECIMAL(10, 2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_call_billing_audit_created_at ON call_billing_audit(created_at DESC);
+    `);
+
+    await pool.query(`
+      UPDATE listeners
+      SET user_rate_per_min = COALESCE(user_rate_per_min, rate_per_minute),
+          listener_payout_per_min = COALESCE(listener_payout_per_min, rate_per_minute)
+      WHERE user_rate_per_min IS NULL OR listener_payout_per_min IS NULL
+    `);
+
+    await pool.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'listeners_payout_rate_check'
+        ) THEN
+          ALTER TABLE listeners
+          ADD CONSTRAINT listeners_payout_rate_check
+          CHECK (listener_payout_per_min <= user_rate_per_min);
+        END IF;
+      END$$;
+    `);
     
     // If phone_number is marked NOT NULL in the existing DB, allow nulls for social accounts
     const dropNotNullSql = `
@@ -243,7 +365,7 @@ async function closePool() {
 }
 
 export { pool, testConnection, executeQuery, closePool };
-export { ensureSchema };
+export { ensureSchema, getRateConfig };
 
 
 

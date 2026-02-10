@@ -205,6 +205,31 @@ const ListenerDetails = () => {
     </div>
   );
 
+  const renderRatingStars = (value = 0) => {
+    const safeValue = Number(value) || 0;
+    const stars = [];
+    for (let i = 1; i <= 5; i += 1) {
+      const full = safeValue >= i;
+      const half = !full && safeValue >= i - 0.5;
+      stars.push(
+        <span key={`star-${i}`} className="relative inline-flex">
+          <Star className="w-5 h-5 text-amber-300" />
+          {half && (
+            <span className="absolute inset-0 overflow-hidden" style={{ width: '50%' }}>
+              <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+            </span>
+          )}
+          {full && (
+            <span className="absolute inset-0">
+              <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+            </span>
+          )}
+        </span>
+      );
+    }
+    return stars;
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -776,6 +801,34 @@ const ListenerDetails = () => {
                           hour: '2-digit',
                           minute: '2-digit'
                         }) : 'N/A'}
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 h-fit">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Listener Ratings</h3>
+                          <p className="text-sm text-gray-600 dark:text-gray-400">Call feedback overview</p>
+                        </div>
+                        {Number(stats?.average_rating || 0) >= 4.5 && (
+                          <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                            <Award className="w-3.5 h-3.5" />
+                            Top Rated Listener
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-4xl font-bold text-gray-900 dark:text-white">
+                          {stats?.average_rating ? Number(stats.average_rating).toFixed(1) : '0.0'}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-1">
+                            {renderRatingStars(Number(stats?.average_rating || 0))}
+                          </div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                            {stats?.total_ratings || 0} total ratings
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>

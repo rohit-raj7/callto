@@ -14,6 +14,8 @@ import DeleteRequests from './pages/DeleteRequests';
 import ListenersManagement from './pages/ListenersManagement';
 import ListenerDetails from './pages/ListenerDetails';
 import ListenerProfile from './pages/ListenerProfile';
+import ListenerRateSettings from './pages/ListenerRateSettings';
+import CallRateConfig from './pages/CallRateConfig';
 import SendNotification from './pages/SendNotification';
 import PrivateRoute from './components/PrivateRoute';
 import Layout from './components/Layout';
@@ -75,6 +77,24 @@ function App() {
                   <PrivateRoute>
                     <Layout>
                       <ListenersManagement />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/listener-rates" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <ListenerRateSettings />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/call-rate-config" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <CallRateConfig />
                     </Layout>
                   </PrivateRoute>
                 </ThemeProvider>

@@ -29,13 +29,22 @@ class Listener {
       // Note: original_name column may not exist in all databases
       // experiences should be updated separately via updateExperiences() method
       // to avoid database compatibility issues
+      const normalizedRate = Number(rate_per_minute || 0);
+      const userRatePerMin = Number.isFinite(normalizedRate) && normalizedRate > 0
+        ? normalizedRate
+        : 4.0;
+      const payoutRatePerMin = Number.isFinite(normalizedRate) && normalizedRate > 0
+        ? Number((normalizedRate * 0.25).toFixed(2))
+        : 1.0;
+
       const query = `
         INSERT INTO listeners (
           user_id, professional_name, age, specialties, languages,
-          rate_per_minute, currency, profile_image, experience_years,
+          rate_per_minute, user_rate_per_min, listener_payout_per_min,
+          currency, profile_image, experience_years,
           education, certifications, mobile_number, verification_status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'pending')
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending')
         RETURNING *
       `;
 
@@ -45,7 +54,9 @@ class Listener {
         age || null,
         sanitizedSpecialties,
         sanitizedLanguages,
-        rate_per_minute,
+        normalizedRate || userRatePerMin,
+        userRatePerMin,
+        payoutRatePerMin,
         currency,
         profile_image || null,
         experience_years || null,
@@ -184,7 +195,24 @@ class Listener {
   // Get all listeners with filters
   static async getAll(filters = {}) {
     let query = `
-      SELECT l.*, u.city, u.country, u.display_name, u.email,
+      SELECT
+        l.listener_id,
+        l.user_id,
+        l.professional_name,
+        l.age,
+        l.specialties,
+        l.languages,
+        l.profile_image,
+        l.average_rating,
+        l.total_ratings,
+        l.total_calls,
+        l.total_minutes,
+        l.is_available,
+        l.verification_status,
+        l.user_rate_per_min,
+        u.city,
+        u.country,
+        u.display_name,
         CASE 
           WHEN l.last_active_at IS NOT NULL AND (NOW() - l.last_active_at) <= INTERVAL '2 minutes' 
           THEN true 
@@ -198,6 +226,7 @@ class Listener {
       FROM listeners l
       JOIN users u ON l.user_id = u.user_id
       WHERE u.is_active = TRUE
+        AND l.is_active = TRUE
         AND COALESCE(l.verification_status, 'approved') = 'approved' -- VERIFICATION CHECK: Only show approved listeners
     `;
     const values = [];
@@ -256,9 +285,9 @@ class Listener {
     } else if (sortBy === 'recent') {
       orderClause += ', l.created_at DESC';
     } else if (sortBy === 'price_low') {
-      orderClause += ', l.rate_per_minute ASC';
+      orderClause += ', l.user_rate_per_min ASC';
     } else if (sortBy === 'price_high') {
-      orderClause += ', l.rate_per_minute DESC';
+      orderClause += ', l.user_rate_per_min DESC';
     }
     
     query += orderClause;
@@ -277,7 +306,24 @@ class Listener {
   // Search listeners by name, specialty, or city
   static async search(searchTerm) {
     const query = `
-      SELECT l.*, u.city, u.country, u.display_name,
+      SELECT
+        l.listener_id,
+        l.user_id,
+        l.professional_name,
+        l.age,
+        l.specialties,
+        l.languages,
+        l.profile_image,
+        l.average_rating,
+        l.total_ratings,
+        l.total_calls,
+        l.total_minutes,
+        l.is_available,
+        l.verification_status,
+        l.user_rate_per_min,
+        u.city,
+        u.country,
+        u.display_name,
         CASE 
           WHEN l.last_active_at IS NOT NULL AND (NOW() - l.last_active_at) <= INTERVAL '2 minutes' 
           THEN true 
@@ -291,6 +337,7 @@ class Listener {
       FROM listeners l
       JOIN users u ON l.user_id = u.user_id
       WHERE u.is_active = TRUE
+        AND l.is_active = TRUE
         AND COALESCE(l.verification_status, 'approved') = 'approved' -- VERIFICATION CHECK: Only show approved listeners
         AND (
           l.professional_name ILIKE $1 
@@ -318,12 +365,17 @@ class Listener {
         COALESCE(l.professional_name, u.display_name) as name,
         l.age,
         l.rate_per_minute,
+        l.user_rate_per_min,
+        l.listener_payout_per_min,
         l.currency,
         l.average_rating,
         l.total_ratings,
         l.is_available,
         l.is_verified,
         l.verification_status,
+        l.total_earning,
+        l.wallet_balance,
+        l.is_active,
         l.created_at,
         l.updated_at,
         l.last_active_at,
@@ -352,12 +404,17 @@ class Listener {
         name: row.name,
         age: row.age,
         rate_per_minute: row.rate_per_minute,
+        user_rate_per_min: row.user_rate_per_min,
+        listener_payout_per_min: row.listener_payout_per_min,
         currency: row.currency,
         average_rating: row.average_rating,
         total_ratings: row.total_ratings,
         is_available: row.is_available,
         is_verified: row.is_verified,
         verification_status: row.verification_status,
+        total_earning: row.total_earning,
+        wallet_balance: row.wallet_balance,
+        is_active: row.is_active,
         created_at: row.created_at,
         updated_at: row.updated_at,
         last_active_at: row.last_active_at,
@@ -381,7 +438,7 @@ class Listener {
     // Accept frontend keys and map to DB columns when needed
     const allowedFields = [
       'professional_name', 'age', 'specialties', 'languages',
-      'rate_per_minute', 'profile_image', 'background_image',
+      'profile_image', 'background_image',
       'experience_years', 'education', 'certifications', 'is_available', 'is_online',
       'mobile_number',
       // allow alias from frontend
@@ -540,7 +597,24 @@ class Listener {
   // Get random available listeners (for random call matching)
   static async getRandomAvailable(limit = 1, excludeListenerId = null) {
     let query = `
-      SELECT l.*, u.city, u.country, u.display_name,
+      SELECT
+        l.listener_id,
+        l.user_id,
+        l.professional_name,
+        l.age,
+        l.specialties,
+        l.languages,
+        l.profile_image,
+        l.average_rating,
+        l.total_ratings,
+        l.total_calls,
+        l.total_minutes,
+        l.is_available,
+        l.verification_status,
+        l.user_rate_per_min,
+        u.city,
+        u.country,
+        u.display_name,
         CASE 
           WHEN l.last_active_at IS NOT NULL AND (NOW() - l.last_active_at) <= INTERVAL '2 minutes' 
           THEN true 
@@ -549,6 +623,7 @@ class Listener {
       FROM listeners l
       JOIN users u ON l.user_id = u.user_id
       WHERE l.is_available = TRUE AND u.is_active = TRUE
+        AND l.is_active = TRUE
         AND COALESCE(l.verification_status, 'approved') = 'approved' -- VERIFICATION CHECK: Only show approved listeners
     `;
     const values = [];

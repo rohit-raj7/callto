@@ -84,6 +84,11 @@ export const getDeleteRequests = (params = {}) => api.get('/admin/delete-request
 export const deleteDeleteRequest = (request_id) => api.delete(`/admin/delete-requests/${request_id}`);
 export const updateListenerVerificationStatus = (listener_id, status) => 
   api.put(`/admin/listeners/${listener_id}/verification-status`, { status });
+export const setListenerRates = (payload) => api.post('/admin/listener/set-rates', payload);
+export const updateListenerRates = (listener_id, payload) =>
+  api.put(`/admin/listener/update-rates/${listener_id}`, payload);
+export const getRateConfig = () => api.get('/admin/rate-config');
+export const updateRateConfig = (payload) => api.put('/admin/rate-config', payload);
 export const getOutbox = (params = {}) => api.get('/notifications/outbox', { params });
 export const updateOutbox = (id, payload) => api.put(`/notifications/outbox/${id}`, payload);
 export const deleteOutbox = (id) => api.delete(`/notifications/outbox/${id}`);
