@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../actions/calling.dart';
 import '../../services/socket_service.dart';
 import '../../services/storage_service.dart';
@@ -20,6 +21,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
   final SocketService _socketService = SocketService();
   final StorageService _storage = StorageService();
   final ListenerService _listenerService = ListenerService();
+  final AudioPlayer _searchAudioPlayer = AudioPlayer();
 
   late AnimationController _pulseController;
   late AnimationController _orbitController;
@@ -52,9 +54,27 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
 
   @override
   void dispose() {
+    _stopSearchSound();
+    _searchAudioPlayer.dispose();
     _pulseController.dispose();
     _orbitController.dispose();
     super.dispose();
+  }
+
+  Future<void> _startSearchSound() async {
+    try {
+      await _searchAudioPlayer.stop();
+      await _searchAudioPlayer.setReleaseMode(ReleaseMode.loop);
+      await _searchAudioPlayer.play(AssetSource('voice/random.mp3'));
+    } catch (e) {
+      debugPrint('RandomCall: search sound error: $e');
+    }
+  }
+
+  Future<void> _stopSearchSound() async {
+    try {
+      await _searchAudioPlayer.stop();
+    } catch (_) {}
   }
 
   void findRandomPerson() async {
@@ -62,6 +82,8 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
       isSearching = true;
       matchedUser = null;
     });
+
+    _startSearchSound();
 
     // Minimum search animation time for better UX
     final minSearchTime = Future.delayed(const Duration(seconds: 2));
@@ -118,6 +140,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
         onlineListeners.shuffle();
         final randomListener = onlineListeners.first;
         
+        await _stopSearchSound();
         setState(() {
           isSearching = false;
           matchedUser = {
@@ -130,6 +153,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
           };
         });
       } else {
+        await _stopSearchSound();
         setState(() {
           isSearching = false;
           matchedUser = null;
@@ -145,6 +169,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
       }
     } catch (e) {
       print('Error finding random listener: $e');
+      await _stopSearchSound();
       await minSearchTime;
       setState(() {
         isSearching = false;

@@ -46,6 +46,7 @@ flutter:
     - assets/images/girl1.jpg
     - assets/images/girl2.jpg
     - assets/voice/sample.mp3
+    - assets/voice/random.mp3
     - assets/voice/calling.mp3
     - assets/login/logo.png
     - assets/login/homelogo.png
