@@ -161,7 +161,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No listeners online right now. Please try again later.'),
+              content: Text('No Experts online right now. Please try again later.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -178,7 +178,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to find listener: ${e.toString()}'),
+            content: Text('Failed to find Experts: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -226,7 +226,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
     
     // Notify listener via socket
     if (listenerId != null) {
-      print('Caller: Initiating call to listener userId: $listenerId');
+      print('Caller: Initiating call to Experts userId: $listenerId');
       _socketService.initiateCall(
         callId: callId,
         listenerId: listenerId,
@@ -236,7 +236,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
         gender: userGender,
       );
     } else {
-      print('Warning: No listener userId available for call');
+      print('Warning: No Experts userId available for call');
     }
     
     if (!mounted) return;
@@ -408,7 +408,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
               Padding(
                 padding: EdgeInsets.symmetric(horizontal: size.width * 0.05),
                 child: Text(
-                  "Connect instantly with a verified listener for a random voice conversation.",
+                  "Connect instantly with a verified Experts for a random voice conversation.",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white.withOpacity(0.72),
@@ -434,7 +434,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                     Icon(Icons.verified_rounded, color: Colors.white.withOpacity(0.8), size: size.width * 0.04),
                     SizedBox(width: size.width * 0.02),
                     Text(
-                      "Verified listeners only",
+                      "Verified Experts only",
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.8),
                         fontSize: size.width * 0.032,
@@ -608,7 +608,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
             child: Column(
               children: [
                 Text(
-                  "Finding available listeners...",
+                  "Finding available Experts...",
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
