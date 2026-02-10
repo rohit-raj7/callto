@@ -98,7 +98,7 @@ router.post('/heartbeat', authenticate, async (req, res) => {
     const listener = await Listener.findByUserId(req.userId);
     
     if (!listener) {
-      return res.status(404).json({ error: 'Listener not found' });
+      return res.status(404).json({ error: 'Experts not found' });
     }
 
     await Listener.updateLastActive(listener.listener_id);
@@ -117,7 +117,7 @@ router.get('/:listener_id', async (req, res) => {
     const listener = await Listener.findById(req.params.listener_id);
 
     if (!listener) {
-      return res.status(404).json({ error: 'Listener not found' });
+      return res.status(404).json({ error: 'Experts not found' });
     }
 
     // Map DB response to frontend-friendly keys (provide avatar_url alias)
@@ -147,7 +147,7 @@ router.get('/:listener_id', async (req, res) => {
     });
   } catch (error) {
     console.error('Get listener error:', error);
-    res.status(500).json({ error: 'Failed to fetch listener' });
+    res.status(500).json({ error: 'Failed to fetch Experts' });
   }
 });
 
@@ -155,7 +155,7 @@ router.get('/:listener_id', async (req, res) => {
 // Create listener profile (user becomes a listener)
 router.post('/', authenticate, async (req, res) => {
   try {
-    console.log('Creating listener profile with data:', req.body);
+    console.log('Creating Experts profile with data:', req.body);
     console.log('User ID:', req.userId);
 
     const {
@@ -191,12 +191,12 @@ router.post('/', authenticate, async (req, res) => {
 
     // Check if user already has a listener profile
     const existingListener = await Listener.findByUserId(req.userId);
-    console.log('Existing listener found:', existingListener ? existingListener.listener_id : 'none');
+    console.log('Existing Experts found:', existingListener ? existingListener.listener_id : 'none');
     
     let listener;
     if (existingListener) {
       // Update existing listener profile instead of rejecting
-      console.log('Updating existing listener profile:', existingListener.listener_id);
+      console.log('Updating existing Experts profile:', existingListener.listener_id);
       listener = await Listener.update(existingListener.listener_id, {
         professional_name,
         age: age ? parseInt(age) : undefined,

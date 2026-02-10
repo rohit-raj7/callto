@@ -44,7 +44,7 @@ router.post('/', authenticate, async (req, res) => {
     const listener = await Listener.findById(listener_id);
     
     if (!listener) {
-      return res.status(404).json({ error: 'Listener not found' });
+      return res.status(404).json({ error: 'Experts not found' });
     }
 
     // VERIFICATION CHECK: Block calls to non-approved listeners
@@ -59,18 +59,18 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     if (!listener.is_available || !listener.is_online) {
-      console.log(`[CALLS] Listener ${listener.listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
+      console.log(`[CALLS] Experts ${listener.listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
       return res.status(400).json({ 
-        error: 'Listener is not available',
+        error: 'Experts is not available',
         details: { is_available: listener.is_available, is_online: listener.is_online }
       });
     }
 
     // BUSY CHECK: Block calls to listeners already in an active call
     if (listener.is_busy) {
-      console.log(`[CALLS] Listener ${listener.listener_id} is BUSY — rejecting call`);
+      console.log(`[CALLS] Experts ${listener.listener_id} is BUSY — rejecting call`);
       return res.status(409).json({
-        error: 'Listener is busy',
+        error: 'Experts is busy',
         status: 'busy',
         details: 'This listener is currently on another call. Please try again later.'
       });
@@ -78,14 +78,14 @@ router.post('/', authenticate, async (req, res) => {
 
     const userRate = Number(listener.user_rate_per_min || 0);
     if (!Number.isFinite(userRate) || userRate <= 0) {
-      return res.status(500).json({ error: 'Listener rate is invalid' });
+      return res.status(500).json({ error: 'Experts rate is invalid' });
     }
 
     const wallet = await User.getWallet(req.userId);
     const availableBalance = parseFloat(wallet.balance || 0);
     if (availableBalance < userRate) {
       return res.status(402).json({
-        error: 'Insufficient balance',
+        error: 'Low balance',
         details: `Minimum balance of ₹${userRate} is required to start a call`
       });
     }
