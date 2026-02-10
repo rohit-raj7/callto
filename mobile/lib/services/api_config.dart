@@ -35,10 +35,13 @@ class ApiConfig {
   static final String listenerSearch = '$apiBase/listeners/search';
 
   static final String calls = '$apiBase/calls';
+  static final String callEnd = '$apiBase/calls/end';
   static final String callHistory = '$apiBase/calls/history/me';
   static final String listenerCallHistory = '$apiBase/calls/history/listener';
   static final String activeCalls = '$apiBase/calls/active/me';
   static final String agoraToken = '$apiBase/calls/agora/token';
+  static final String callRates = '$apiBase/config/call-rates';
+  static final String submitRating = '$apiBase/ratings/submit';
 
   static final String chats = '$apiBase/chats';
   static final String contactMessages = '$apiBase/contacts';

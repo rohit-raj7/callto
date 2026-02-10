@@ -92,11 +92,9 @@ class SocketService {
   final StorageService _storage = StorageService();
   final ChatStateManager _chatStateManager = ChatStateManager();
   bool _isConnected = false;
-  String? _listenerUserId;
   final Map<String, bool> listenerOnlineMap = {}; // Tracks all listeners' online status
   final StreamController<Map<String, bool>> _listenerStatusController = StreamController.broadcast();
   bool _connecting = false;
-  final bool _listenerRegistered = false;
   
   // Track joined chat rooms
   final Set<String> _joinedChatRooms = {};

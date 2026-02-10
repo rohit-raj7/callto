@@ -262,32 +262,4 @@ class _ContactUsPageState extends State<ContactUsPage> {
     );
   }
 
-  // --- Text Field Helper ---
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    int maxLines = 1,
-    String? Function(String?)? validator,
-  }) {
-    return TextFormField(
-      controller: controller,
-      maxLines: maxLines,
-      validator: validator,
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.blueAccent),
-        labelText: label,
-        filled: true,
-        fillColor: Colors.grey.shade100,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.blueAccent, width: 1.5),
-        ),
-      ),
-    );
-  }
 }

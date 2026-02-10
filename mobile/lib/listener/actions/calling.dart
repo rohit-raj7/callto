@@ -163,14 +163,6 @@ class _CallingState extends State<Calling>
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final isMediumScreen = screenWidth < 400;
-    final brandFontSize = isSmallScreen ? 30.0 : (isMediumScreen ? 34.0 : 38.0);
-    final avatarSize = isSmallScreen ? 80.0 : (isMediumScreen ? 90.0 : 100.0);
-    final statusFontSize = isSmallScreen ? 16.0 : 18.0;
-    final durationFontSize = isSmallScreen ? 20.0 : 22.0;
-    final horizontalPadding = isSmallScreen ? 12.0 : (isMediumScreen ? 16.0 : 20.0);
-    final topBarPadding = isSmallScreen ? 12.0 : 16.0;
-    final chipFontSize = isSmallScreen ? 11.0 : 13.0;
-    final chipPaddingH = isSmallScreen ? 14.0 : 18.0;
 
     return Scaffold(
       body: Container(

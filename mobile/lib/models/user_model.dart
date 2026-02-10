@@ -21,6 +21,10 @@ class User {
   final double walletBalance;
   final DateTime? createdAt;
   final DateTime? lastLoginAt;
+  final bool isFirstTimeUser;
+  final bool offerUsed;
+  final int? offerMinutesLimit;
+  final double? offerFlatPrice;
 
   User({
     required this.userId,
@@ -44,6 +48,10 @@ class User {
     this.walletBalance = 0,
     this.createdAt,
     this.lastLoginAt,
+    this.isFirstTimeUser = false,
+    this.offerUsed = false,
+    this.offerMinutesLimit,
+    this.offerFlatPrice,
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
@@ -69,6 +77,10 @@ class User {
       isVerified: json['is_verified'] ?? false,
       isActive: json['is_active'] ?? true,
       walletBalance: _safeParseDouble(json['wallet_balance']),
+      isFirstTimeUser: json['is_first_time_user'] ?? false,
+      offerUsed: json['offer_used'] ?? false,
+      offerMinutesLimit: _safeParseInt(json['offer_minutes_limit']),
+      offerFlatPrice: _safeParseDouble(json['offer_flat_price']),
       createdAt: json['created_at'] != null 
           ? DateTime.tryParse(json['created_at']) 
           : null,
@@ -85,6 +97,14 @@ class User {
     if (value is int) return value.toDouble();
     if (value is String) return double.tryParse(value) ?? 0.0;
     return 0.0;
+  }
+
+  static int? _safeParseInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
   }
 
   Map<String, dynamic> toJson() {
@@ -108,6 +128,10 @@ class User {
       'is_verified': isVerified,
       'is_active': isActive,
       'wallet_balance': walletBalance,
+      'is_first_time_user': isFirstTimeUser,
+      'offer_used': offerUsed,
+      'offer_minutes_limit': offerMinutesLimit,
+      'offer_flat_price': offerFlatPrice,
       'created_at': createdAt?.toIso8601String(),
       'last_login_at': lastLoginAt?.toIso8601String(),
     };

@@ -33,7 +33,6 @@ class _WalletScreenState extends State<WalletScreen> {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context).size;
-    final crossAxisCount = media.width > 600 ? 3 : 2;
 
     return Scaffold(
       // Gradient background

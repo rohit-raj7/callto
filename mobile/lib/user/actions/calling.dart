@@ -3,6 +3,9 @@ import 'call_controller.dart';
 import 'audio_device_manager.dart';
 import 'call_action_button.dart';
 import 'audio_route_bottom_sheet.dart';
+import '../../services/call_service.dart';
+import '../nav/profile/transacions.dart';
+import '../screens/listener_rating.dart';
 
 /// ──────────────────────────────────────────────────────────────────
 /// User-side calling screen — professional mobile call UI.
@@ -51,6 +54,10 @@ class _CallingState extends State<Calling>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final UserCallController _controller;
   late final AnimationController _pulseController;
+  bool _summaryShown = false;
+  bool _handledBalanceError = false;
+  bool _hadConnected = false;
+  bool _ratingShown = false;
 
   @override
   void initState() {
@@ -84,10 +91,35 @@ class _CallingState extends State<Calling>
   void _onControllerChanged() {
     if (!mounted) return;
 
-    if (_controller.callState == UserCallState.ended) {
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (mounted) Navigator.pop(context);
+    if (_controller.callState == UserCallState.connected) {
+      _hadConnected = true;
+    }
+
+    // ── Insufficient balance → show error 1s then redirect to wallet ──
+    final error = _controller.connectionError;
+    if (error != null &&
+        !_handledBalanceError &&
+        (error.toLowerCase().contains('insufficient') ||
+            error.toLowerCase().contains('low balance'))) {
+      _handledBalanceError = true;
+      Future.delayed(const Duration(seconds: 1), () {
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const WalletScreen()),
+        );
       });
+      setState(() {});
+      return;
+    }
+
+    if (_controller.callState == UserCallState.ended) {
+      if (_controller.billingSummary != null && !_summaryShown) {
+        _summaryShown = true;
+        _showBillingSummary(_controller.billingSummary!);
+      } else {
+        _openRatingOrClose();
+      }
     }
 
     setState(() {});
@@ -95,6 +127,105 @@ class _CallingState extends State<Calling>
 
   void _onAudioChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _showBillingSummary(CallBillingSummary summary) async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: const BoxDecoration(
+            color: Color(0xFF0F172A),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Call Summary',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _summaryRow('Duration', '${summary.durationSeconds}s'),
+              _summaryRow('Billed Minutes', summary.minutes.toString()),
+              _summaryRow('Total Charge', '₹${summary.userCharge.toStringAsFixed(2)}'),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.pinkAccent,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Done',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (mounted) {
+      _openRatingOrClose();
+    }
+  }
+
+  bool _shouldOpenRating() {
+    return !_handledBalanceError && _hadConnected && !_ratingShown;
+  }
+
+  void _openRatingOrClose() {
+    if (_shouldOpenRating()) {
+      _ratingShown = true;
+      final callId = _controller.callId;
+      if (callId != null && callId.isNotEmpty) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ListenerRatingScreen(
+              callId: callId,
+              listenerName: widget.callerName,
+              listenerAvatar: widget.callerAvatar,
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) Navigator.pop(context);
+    });
+  }
+
+  Widget _summaryRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70)),
+          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -160,14 +291,6 @@ class _CallingState extends State<Calling>
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 360;
     final isMediumScreen = screenWidth < 400;
-    final brandFontSize = isSmallScreen ? 30.0 : (isMediumScreen ? 34.0 : 38.0);
-    final avatarSize = isSmallScreen ? 80.0 : (isMediumScreen ? 90.0 : 100.0);
-    final statusFontSize = isSmallScreen ? 16.0 : 18.0;
-    final durationFontSize = isSmallScreen ? 20.0 : 22.0;
-    final horizontalPadding = isSmallScreen ? 12.0 : (isMediumScreen ? 16.0 : 20.0);
-    final topBarPadding = isSmallScreen ? 12.0 : 16.0;
-    final chipFontSize = isSmallScreen ? 11.0 : 13.0;
-    final chipPaddingH = isSmallScreen ? 14.0 : 18.0;
 
     return Scaffold(
       body: Container(
@@ -430,17 +553,6 @@ class _CallingState extends State<Calling>
                 ),
               ],
             ),
-            if (_controller.billedMinutes > 0) ...[
-              const SizedBox(height: 6),
-              Text(
-                _controller.formattedBilledAmount,
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 12 : 13,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white70,
-                ),
-              ),
-            ],
           ],
         );
 

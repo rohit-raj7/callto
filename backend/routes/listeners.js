@@ -126,6 +126,14 @@ router.get('/:listener_id', async (req, res) => {
       responseListener.avatar_url = listener.profile_image;
     }
 
+    delete responseListener.listener_payout_per_min;
+    delete responseListener.wallet_balance;
+    delete responseListener.total_earning;
+
+    delete responseListener.listener_payout_per_min;
+    delete responseListener.wallet_balance;
+    delete responseListener.total_earning;
+
     // Get listener stats
     const stats = await Listener.getStats(req.params.listener_id);
 
@@ -165,15 +173,17 @@ router.post('/', authenticate, async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!professional_name || rate_per_minute === undefined || rate_per_minute === null || !specialties || !languages) {
+    if (!professional_name || !specialties || !languages) {
       return res.status(400).json({ 
-        error: 'Professional name, rate, specialties, and languages are required' 
+        error: 'Professional name, specialties, and languages are required' 
       });
     }
 
-    // Validate data types
-    const rateValue = parseFloat(rate_per_minute);
-    if (isNaN(rateValue) || rateValue <= 0) {
+    // Validate rate if provided (rates are admin-controlled)
+    const rateValue = rate_per_minute !== undefined && rate_per_minute !== null
+      ? parseFloat(rate_per_minute)
+      : null;
+    if (rateValue !== null && (isNaN(rateValue) || rateValue <= 0)) {
       return res.status(400).json({ 
         error: 'Rate per minute must be a valid positive number' 
       });
@@ -192,7 +202,6 @@ router.post('/', authenticate, async (req, res) => {
         age: age ? parseInt(age) : undefined,
         specialties: Array.isArray(specialties) ? specialties : [specialties],
         languages: Array.isArray(languages) ? languages : [languages],
-        rate_per_minute: rateValue,
         experience_years: experience_years ? parseInt(experience_years) : undefined,
         education,
         certifications: Array.isArray(certifications) ? certifications : [],
@@ -206,7 +215,7 @@ router.post('/', authenticate, async (req, res) => {
         age: age ? parseInt(age) : undefined,
         specialties: Array.isArray(specialties) ? specialties : [specialties],
         languages: Array.isArray(languages) ? languages : [languages],
-        rate_per_minute: rateValue,
+        rate_per_minute: rateValue || 0,
         experience_years: experience_years ? parseInt(experience_years) : undefined,
         education,
         certifications: Array.isArray(certifications) ? certifications : [],
@@ -325,6 +334,10 @@ router.put('/:listener_id', authenticate, async (req, res) => {
     if (updatedListener && updatedListener.profile_image) {
       responseListener.avatar_url = updatedListener.profile_image;
     }
+
+    delete responseListener.listener_payout_per_min;
+    delete responseListener.wallet_balance;
+    delete responseListener.total_earning;
 
     res.json({
       message: 'Listener profile updated successfully',

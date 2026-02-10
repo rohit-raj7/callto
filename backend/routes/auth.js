@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 
 import User from '../models/User.js';
 import Listener from '../models/Listener.js';
-import { pool } from '../db.js';
+import { pool, getRateConfig } from '../db.js';
 import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -118,6 +118,8 @@ router.post('/social-login', async (req, res) => {
 
     // ===================== CREATE USER =====================
     if (!user) {
+      const rateConfig = await getRateConfig();
+      const isFirstTimeUser = provider === 'google';
       user = await User.create({
         phone_number: null,
         email: userInfo.email || null,
@@ -128,6 +130,10 @@ router.post('/social-login', async (req, res) => {
         display_name: userInfo.display_name,
         avatar_url: userInfo.avatar_url,
         account_type: 'user',
+        is_first_time_user: isFirstTimeUser,
+        offer_used: false,
+        offer_minutes_limit: rateConfig?.offer_minutes_limit,
+        offer_flat_price: rateConfig?.offer_flat_price
       });
       isNewUser = true;
     } else {

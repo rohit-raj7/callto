@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../widgets/expert_card.dart';
 import '../widgets/top_bar.dart';
+import '../../services/call_service.dart';
 import '../../services/listener_service.dart';
 import '../../services/socket_service.dart';
+import '../../services/storage_service.dart';
 import '../../models/listener_model.dart' as listener_model;
+import '../../models/user_model.dart';
 import '../../ui/skeleton_loading_ui/listener_card_skeleton.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -15,6 +19,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final ListenerService _listenerService = ListenerService();
+  final CallService _callService = CallService();
+  final StorageService _storageService = StorageService();
   
   String? selectedTopic;
   Map<String, bool> listenerOnlineMap = {};
@@ -22,6 +28,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<listener_model.Listener> _filteredListeners = [];
   bool _isLoading = false;
   String? _error;
+  RateConfig? _rateConfig;
+  bool _isFirstTimeEligible = false;
 
   final List<String> topics = [
     'All',
@@ -36,6 +44,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     selectedTopic = 'All';
+
+    _loadOfferEligibility();
+    _loadRateConfig();
     
     // Connect to socket first to get initial presence status
     SocketService().connectListener().then((_) {
@@ -54,6 +65,58 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     });
+  }
+
+  Future<void> _loadOfferEligibility() async {
+    try {
+      final rawUser = await _storageService.getUserData();
+      if (rawUser == null) return;
+      final decoded = jsonDecode(rawUser);
+      Map<String, dynamic>? payload;
+      if (decoded is Map<String, dynamic>) {
+        payload = decoded;
+      } else if (decoded is Map) {
+        payload = decoded.map((key, value) => MapEntry(key.toString(), value));
+      }
+
+      if (payload == null) return;
+      final user = User.fromJson(payload);
+      if (mounted) {
+        setState(() {
+          _isFirstTimeEligible = user.isFirstTimeUser && !user.offerUsed;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isFirstTimeEligible = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadRateConfig() async {
+    try {
+      final result = await _callService.getCallRates();
+      if (result.success && result.rateConfig != null) {
+        await _storageService.saveCallRateConfig(result.rateConfig!.toJson());
+        if (mounted) {
+          setState(() {
+            _rateConfig = result.rateConfig;
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      // Fall back to cached config below.
+    }
+
+    final cached = await _storageService.getCallRateConfig();
+    if (cached != null && mounted) {
+      setState(() {
+        _rateConfig = RateConfig.fromJson(cached);
+      });
+    }
   }
 
   Future<void> _loadListeners() async {
@@ -145,6 +208,29 @@ class _HomeScreenState extends State<HomeScreen> {
     
     // Fall back to API status
     return listener.isOnline;
+  }
+
+  String _formatOfferAmount(double value) {
+    if (value % 1 == 0) {
+      return value.toStringAsFixed(0);
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  String? _buildOfferRateText() {
+    final config = _rateConfig;
+    if (config == null || !_isFirstTimeEligible || !config.firstTimeOfferEnabled) {
+      return null;
+    }
+
+    final minutes = config.offerMinutesLimit ?? 0;
+    final price = config.offerFlatPrice ?? 0;
+    if (minutes <= 0 || price <= 0) {
+      return null;
+    }
+
+    final offerPerMinute = price / minutes;
+    return '₹${_formatOfferAmount(offerPerMinute)}/min';
   }
 
   @override
@@ -307,12 +393,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 itemBuilder: (context, index) {
                                   final listener = _filteredListeners[index];
                                   final isOnline = _isListenerOnline(listener);
+                                  final offerRateText = _buildOfferRateText();
+                                  final normalRateText =
+                                      '₹${listener.ratePerMinute.toStringAsFixed(0)}/min';
                                   return ExpertCard(
                                     name: listener.professionalName ?? 'Unknown',
                                     age: listener.age ?? 20,
                                     city: listener.location,
                                     topic: listener.primarySpecialty,
-                                    rate: listener.formattedRate,
+                                    rate: offerRateText ?? normalRateText,
+                                    secondaryRate: offerRateText != null ? normalRateText : null,
                                     rating: listener.rating,
                                     imagePath: listener.avatarUrl ?? 'assets/images/khushi.jpg',
                                     languages: listener.languages,

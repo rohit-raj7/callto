@@ -61,8 +61,7 @@ const validateListenerProfile = [
     .isLength({ min: 2, max: 100 })
     .withMessage('Professional name must be between 2 and 100 characters'),
   body('rate_per_minute')
-    .notEmpty()
-    .withMessage('Rate per minute is required')
+    .optional()
     .isFloat({ min: 0 })
     .withMessage('Rate must be a positive number'),
   body('specialties')

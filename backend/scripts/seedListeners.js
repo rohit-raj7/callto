@@ -55,12 +55,29 @@ async function seedListeners() {
       const userId = userResult.rows[0].user_id;
 
       // 2. Create listener profile
+      const payoutRate = Number((data.rate_per_minute * 0.25).toFixed(2));
+
       await pool.query(
-        `INSERT INTO listeners (user_id, professional_name, specialties, languages, rate_per_minute, profile_image, is_available, is_verified)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO listeners (
+           user_id, professional_name, specialties, languages,
+           rate_per_minute, user_rate_per_min, listener_payout_per_min,
+           profile_image, is_available, is_verified
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (user_id) DO UPDATE SET is_available = TRUE
          RETURNING listener_id`,
-        [userId, data.professional_name, data.specialties, data.languages, data.rate_per_minute, data.profile_image, true, true]
+        [
+          userId,
+          data.professional_name,
+          data.specialties,
+          data.languages,
+          data.rate_per_minute,
+          data.rate_per_minute,
+          payoutRate,
+          data.profile_image,
+          true,
+          true
+        ]
       );
       
       console.log(`✅ Added listener: ${data.display_name}`);

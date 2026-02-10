@@ -662,49 +662,6 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage>
     );
   }
 
-  /// Build breakdown row for earnings card
-  Widget _buildBreakdownRow(
-    String label, 
-    String value, 
-    IconData icon, {
-    bool isDeduction = false,
-    bool isFinal = false,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
-          children: [
-            Icon(
-              icon,
-              color: Colors.white70,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.9),
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            color: isDeduction 
-                ? Colors.red[200] 
-                : isFinal 
-                    ? Colors.greenAccent 
-                    : Colors.white,
-            fontSize: isFinal ? 15 : 14,
-            fontWeight: isFinal ? FontWeight.bold : FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
 
   /// Build stat pill widget
   Widget _buildStatPill(IconData icon, String text) {
@@ -1097,34 +1054,6 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage>
     );
   }
 
-  /// Build week earnings row
-  Widget _buildWeekEarningsRow(String label, String value, {bool isDeduction = false, bool isFinal = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: isFinal ? 14 : 13,
-            fontWeight: isFinal ? FontWeight.w600 : FontWeight.normal,
-            color: Colors.grey[700],
-          ),
-        ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: isFinal ? 16 : 13,
-            fontWeight: isFinal ? FontWeight.bold : FontWeight.w500,
-            color: isDeduction 
-                ? Colors.red[400] 
-                : isFinal 
-                    ? Colors.green 
-                    : Colors.black87,
-          ),
-        ),
-      ],
-    );
-  }
 
   /// Build empty state widget
   Widget _buildEmptyState(String title, String subtitle) {

@@ -14,7 +14,6 @@ class _FAQsPageState extends State<FAQsPage> {
   // App Colors - consistent with the rest of the app
   static const Color primaryPink = Color(0xFFFF4081);
   static const Color backgroundPink = Color(0xFFFCE4EC);
-  static const Color textDark = Color(0xFF880E4F);
 
   final Map<String, List<Map<String, String>>> categorizedFaqs = {
     'Account': [

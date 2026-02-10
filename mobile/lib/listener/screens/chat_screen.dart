@@ -83,13 +83,7 @@ class _ChatScreenState extends State<ChatScreen> {
       if (idx != -1) {
         final old = _chats[idx];
         final senderId = messageData['sender_id']?.toString() ?? '';
-        final isFromOther = senderId != old.user1Id && senderId != old.user2Id
-            ? false
-            : (senderId == old.user1Id
-                ? old.user1Id != senderId
-                : old.user2Id != senderId);
-        // Simple: if senderId != current user equivalent, increment unread
-        final currentUserIsParticipant = true; // listener is always a participant
+        // Simple: listener is always a participant; increment unread count
         _chats[idx] = Chat(
           chatId: old.chatId,
           user1Id: old.user1Id,

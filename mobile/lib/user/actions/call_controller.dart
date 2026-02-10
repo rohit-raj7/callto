@@ -17,7 +17,6 @@ enum UserCallState { calling, connecting, connected, ended }
 /// Controller that owns all call logic for the user-side calling screen.
 /// Widget only listens and renders — zero business logic in the UI.
 class UserCallController extends ChangeNotifier {
-  static const int billingRatePerMinute = 4;
   // ── Constructor params ──
   final String callerName;
   final String callerAvatar;
@@ -74,9 +73,14 @@ class UserCallController extends ChangeNotifier {
   String? _currentChannelName;
   String? _callId;
 
+  String? get callId => _callId ?? _currentChannelName;
+
   Timer? _callTimer;
   Timer? _noAnswerTimer;
   bool _disposed = false;
+
+  CallBillingSummary? _billingSummary;
+  CallBillingSummary? get billingSummary => _billingSummary;
 
   // ── Public helpers ──
   String get formattedDuration {
@@ -85,14 +89,6 @@ class UserCallController extends ChangeNotifier {
     return '$mins:$secs';
   }
 
-  int get billedMinutes {
-    if (_callDuration <= 0) return 0;
-    return ((_callDuration + 59) ~/ 60);
-  }
-
-  int get billedAmount => billedMinutes * billingRatePerMinute;
-
-  String get formattedBilledAmount => '₹$billedAmount';
 
   String get statusText {
     if (_connectionError != null) return _connectionError!;
@@ -372,11 +368,22 @@ class UserCallController extends ChangeNotifier {
     final cid = _callId ?? _currentChannelName;
     if (cid != null) {
       final status = wasConnected || _callDuration > 0 ? 'completed' : 'cancelled';
-      await _callService.updateCallStatus(
-        callId: cid,
-        status: status,
-        durationSeconds: _callDuration > 0 ? _callDuration : null,
-      );
+      if (status == 'completed') {
+        final result = await _callService.endCall(
+          callId: cid,
+          durationSeconds: _callDuration,
+        );
+        if (result.success && result.summary != null) {
+          _billingSummary = result.summary;
+          notifyListeners();
+        }
+      } else {
+        await _callService.updateCallStatus(
+          callId: cid,
+          status: status,
+          durationSeconds: _callDuration > 0 ? _callDuration : null,
+        );
+      }
     }
 
     // Clean up Agora

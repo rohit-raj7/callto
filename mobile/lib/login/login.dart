@@ -293,18 +293,6 @@ class _LoginScreenState extends State with TickerProviderStateMixin {
     );
   }
 
-  void _skipLoginForDemo() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-            'Demo mode: Some features may not work without authentication'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 3),
-      ),
-    );
-    _navigateToMain();
-  }
-
   void _navigateToTerms() {
     Navigator.push(
       context,

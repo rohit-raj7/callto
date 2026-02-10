@@ -100,19 +100,6 @@ class UserAudioDeviceManager extends ChangeNotifier {
     }
   }
 
-  /// Remove a route when device is disconnected.
-  void _removeAvailableRoute(UserAudioRoute route) {
-    if (_availableRoutes.contains(route)) {
-      _availableRoutes = _availableRoutes.where((r) => r != route).toSet();
-      // If current route was removed, fall back to earpiece
-      if (_currentRoute == route) {
-        _currentRoute = UserAudioRoute.earpiece;
-        _agoraService.setEnableSpeakerphone(false);
-      }
-      notifyListeners();
-    }
-  }
-
   // ── User actions ──
 
   /// Switch to a specific audio route.

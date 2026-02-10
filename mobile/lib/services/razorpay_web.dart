@@ -89,8 +89,6 @@ String? getErrorDescription(JSObject response) {
 external JSObject _createJSObject();
 
 @JS('Object.defineProperty')
-external void _defineProperty(JSObject obj, JSString prop, JSObject descriptor);
-
 void _setProperty(JSObject obj, String key, JSAny value) {
   _setPropertyJS(obj, key.toJS, value);
 }

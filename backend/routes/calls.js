@@ -8,8 +8,27 @@ import Listener from '../models/Listener.js';
 import User from '../models/User.js';
 import { authenticate } from '../middleware/auth.js';
 import config from '../config/config.js';
+import { finalizeCallBilling } from '../services/callBillingService.js';
 
-const BILLING_RATE_PER_MINUTE = 4;
+const resolveDurationSeconds = (call, durationSeconds) => {
+  const endedAt = new Date();
+  if (call.started_at) {
+    return Math.max(
+      0,
+      Math.round((endedAt.getTime() - new Date(call.started_at).getTime()) / 1000)
+    );
+  }
+  if (call.created_at) {
+    return Math.max(
+      0,
+      Math.round((endedAt.getTime() - new Date(call.created_at).getTime()) / 1000)
+    );
+  }
+  if (durationSeconds !== undefined) {
+    return Math.max(0, Number(durationSeconds) || 0);
+  }
+  return 0;
+};
 
 // POST /api/calls
 // Initiate a new call
@@ -40,19 +59,24 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     if (!listener.is_available || !listener.is_online) {
-      console.log(`[CALLS] Listener ${listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
+      console.log(`[CALLS] Listener ${listener.listener_id} unavailable: available=${listener.is_available}, online=${listener.is_online}`);
       return res.status(400).json({ 
         error: 'Listener is not available',
         details: { is_available: listener.is_available, is_online: listener.is_online }
       });
     }
 
+    const userRate = Number(listener.user_rate_per_min || 0);
+    if (!Number.isFinite(userRate) || userRate <= 0) {
+      return res.status(500).json({ error: 'Listener rate is invalid' });
+    }
+
     const wallet = await User.getWallet(req.userId);
     const availableBalance = parseFloat(wallet.balance || 0);
-    if (availableBalance < BILLING_RATE_PER_MINUTE) {
+    if (availableBalance < userRate) {
       return res.status(402).json({
         error: 'Insufficient balance',
-        details: `Minimum balance of ₹${BILLING_RATE_PER_MINUTE} is required to start a call`
+        details: `Minimum balance of ₹${userRate} is required to start a call`
       });
     }
 
@@ -61,7 +85,7 @@ router.post('/', authenticate, async (req, res) => {
       caller_id: req.userId,
       listener_id,
       call_type: call_type || 'audio',
-      rate_per_minute: BILLING_RATE_PER_MINUTE
+      rate_per_minute: userRate
     });
 
     res.status(201).json({
@@ -129,46 +153,30 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    let additionalData = {};
-
-    // Calculate cost if call is completed
     if (status === 'completed') {
-      const endedAt = new Date();
-      let resolvedDurationSeconds = 0;
-      if (call.started_at) {
-        resolvedDurationSeconds = Math.max(
-          0,
-          Math.round((endedAt.getTime() - new Date(call.started_at).getTime()) / 1000)
-        );
-      } else if (call.created_at) {
-        resolvedDurationSeconds = Math.max(
-          0,
-          Math.round((endedAt.getTime() - new Date(call.created_at).getTime()) / 1000)
-        );
-      } else if (duration_seconds !== undefined) {
-        resolvedDurationSeconds = Math.max(0, Number(duration_seconds) || 0);
+      const resolvedDurationSeconds = resolveDurationSeconds(call, duration_seconds);
+      const billing = await finalizeCallBilling({
+        callId: req.params.call_id,
+        durationSeconds: resolvedDurationSeconds
+      });
+
+      if (!billing.alreadyBilled) {
+        await Listener.incrementCallStats(call.listener_id, billing.minutes);
       }
 
-      const totalCost = Call.calculateBillingAmount(
-        resolvedDurationSeconds,
-        BILLING_RATE_PER_MINUTE
-      );
-      const billedMinutes = Call.calculateBillingMinutes(resolvedDurationSeconds);
-
-      additionalData = {
-        duration_seconds: resolvedDurationSeconds,
-        total_cost: totalCost
-      };
-
-      await User.deductBalanceForCall(call.caller_id, totalCost, call.call_id);
-      await Listener.incrementCallStats(call.listener_id, billedMinutes);
+      const updatedCall = await Call.findById(req.params.call_id);
+      return res.json({
+        message: 'Call status updated',
+        call: updatedCall,
+        billing: {
+          minutes: billing.minutes,
+          userCharge: billing.userCharge,
+          durationSeconds: resolvedDurationSeconds
+        }
+      });
     }
 
-    const updatedCall = await Call.updateStatus(
-      req.params.call_id,
-      status,
-      additionalData
-    );
+    const updatedCall = await Call.updateStatus(req.params.call_id, status);
 
     res.json({
       message: 'Call status updated',
@@ -180,6 +188,61 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
       return res.status(402).json({ error: 'Insufficient balance to complete billing' });
     }
     res.status(500).json({ error: 'Failed to update call status' });
+  }
+});
+
+// POST /api/calls/end
+// Finalize call billing with duration
+router.post('/end', authenticate, async (req, res) => {
+  try {
+    const { callId, durationSeconds } = req.body || {};
+
+    if (!callId) {
+      return res.status(400).json({ error: 'callId is required' });
+    }
+
+    const call = await Call.findById(callId);
+    if (!call) {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+
+    const listener = await Listener.findByUserId(req.userId);
+    const isListener = listener && call.listener_id === listener.listener_id;
+
+    if (call.caller_id !== req.userId && !isListener) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const resolvedDurationSeconds = resolveDurationSeconds(call, durationSeconds);
+    const billing = await finalizeCallBilling({
+      callId,
+      durationSeconds: resolvedDurationSeconds
+    });
+
+    if (!billing.alreadyBilled) {
+      await Listener.incrementCallStats(call.listener_id, billing.minutes);
+    }
+
+    const updatedCall = await Call.findById(callId);
+
+    res.json({
+      message: 'Call ended',
+      call: updatedCall,
+      billing: {
+        minutes: billing.minutes,
+        userCharge: billing.userCharge,
+        durationSeconds: resolvedDurationSeconds
+      }
+    });
+  } catch (error) {
+    console.error('End call error:', error);
+    if (error.code === 'INSUFFICIENT_BALANCE') {
+      return res.status(402).json({ error: 'Insufficient balance to complete billing' });
+    }
+    if (error.code === 'CALL_NOT_FOUND') {
+      return res.status(404).json({ error: 'Call not found' });
+    }
+    res.status(500).json({ error: 'Failed to end call' });
   }
 });
 
@@ -321,12 +384,26 @@ router.post('/random', authenticate, async (req, res) => {
       });
     }
 
+    const userRate = Number(listener.user_rate_per_min || 0);
+    if (!Number.isFinite(userRate) || userRate <= 0) {
+      return res.status(500).json({ error: 'Listener rate is invalid' });
+    }
+
+    const wallet = await User.getWallet(req.userId);
+    const availableBalance = parseFloat(wallet.balance || 0);
+    if (availableBalance < userRate) {
+      return res.status(402).json({
+        error: 'Insufficient balance',
+        details: `Minimum balance of ₹${userRate} is required to start a call`
+      });
+    }
+
     // Create call with random listener
     const call = await Call.create({
       caller_id: req.userId,
       listener_id: listener.listener_id,
       call_type: call_type || 'audio',
-      rate_per_minute: listener.rate_per_minute
+      rate_per_minute: userRate
     });
 
     res.status(201).json({

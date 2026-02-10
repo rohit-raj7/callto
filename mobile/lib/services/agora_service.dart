@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'api_service.dart';
 import 'api_config.dart';
-import 'storage_service.dart';
 
 /// Token fetch result
 class TokenResult {
@@ -24,12 +23,6 @@ class AgoraService {
   static final AgoraService _instance = AgoraService._internal();
   factory AgoraService() => _instance;
   AgoraService._internal();
-
-  // Backend URL for token generation (use same URL as API config)
-  static final String _backendUrl = ApiConfig.baseUrl;
-  
-  // Storage service for auth token
-  final StorageService _storage = StorageService();
 
   RtcEngine? _engine;
   bool _isInitialized = false;

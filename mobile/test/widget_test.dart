@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:call_u/main.dart';
+import 'package:callto/main.dart';
 
 void main() {
   testWidgets('App shows splash progress indicator', (WidgetTester tester) async {

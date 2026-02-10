@@ -104,28 +104,6 @@ class IncomingCallOverlayService {
     _context = null;
   }
 
-  void _showIncomingCallOverlay(IncomingCall call) {
-    if (_context == null) {
-      print('No context available for overlay');
-      return;
-    }
-
-    // Remove existing overlay if any
-    _removeOverlay();
-
-    _overlayEntry = OverlayEntry(
-      builder: (context) => _IncomingCallOverlayWidget(
-        call: call,
-        onAccept: () => _acceptCall(call),
-        onReject: () => _rejectCall(call),
-      ),
-    );
-
-    final overlay = Overlay.of(_context!);
-    overlay.insert(_overlayEntry!);
-    print('Showing incoming call overlay for ${call.callerName}');
-  }
-
   void _removeOverlay() {
     _overlayEntry?.remove();
     _overlayEntry = null;

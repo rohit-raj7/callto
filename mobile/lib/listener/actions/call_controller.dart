@@ -284,11 +284,18 @@ class CallController extends ChangeNotifier {
       final status = wasConnected || _callDuration > 0
           ? 'completed'
           : 'cancelled';
-      await _callService.updateCallStatus(
-        callId: cid,
-        status: status,
-        durationSeconds: _callDuration > 0 ? _callDuration : null,
-      );
+      if (status == 'completed') {
+        await _callService.endCall(
+          callId: cid,
+          durationSeconds: _callDuration,
+        );
+      } else {
+        await _callService.updateCallStatus(
+          callId: cid,
+          status: status,
+          durationSeconds: _callDuration > 0 ? _callDuration : null,
+        );
+      }
     }
 
     // Clean up Agora

@@ -11,6 +11,7 @@ class ExpertCard extends StatefulWidget {
   final String city;
   final String topic;
   final String rate;
+  final String? secondaryRate;
   final double rating;
   final String imagePath;
   final List<String> languages;
@@ -25,6 +26,7 @@ class ExpertCard extends StatefulWidget {
     required this.city,
     required this.topic,
     required this.rate,
+    this.secondaryRate,
     required this.rating,
     required this.imagePath,
     this.languages = const ['Hindi', 'English'],
@@ -540,20 +542,35 @@ class _ExpertCardState extends State<ExpertCard> with SingleTickerProviderStateM
                       Container(
                         padding: EdgeInsets.symmetric(
                           horizontal: isSmallScreen ? 6 : 10,
-                          vertical: isSmallScreen ? 3 : 4,
+                          vertical: isSmallScreen ? 4 : 6,
                         ),
                         decoration: BoxDecoration(
                           color: Colors.green.withOpacity(0.1),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.green.withOpacity(0.3)),
                         ),
-                        child: Text(
-                          widget.rate,
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontSize: isSmallScreen ? 10 : 12,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              widget.rate,
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: isSmallScreen ? 10 : 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (widget.secondaryRate != null && widget.secondaryRate!.isNotEmpty)
+                              Text(
+                                widget.secondaryRate!,
+                                style: TextStyle(
+                                  color: Colors.green.shade700,
+                                  fontSize: isSmallScreen ? 8 : 10,
+                                  fontWeight: FontWeight.w600,
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ],

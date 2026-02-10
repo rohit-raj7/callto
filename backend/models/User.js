@@ -17,22 +17,28 @@ class User {
       city,
       country,
       avatar_url,
-      account_type = 'user'
+      account_type = 'user',
+      is_first_time_user = false,
+      offer_used = false,
+      offer_minutes_limit = null,
+      offer_flat_price = null
     } = userData;
 
     const query = `
       INSERT INTO users (
         phone_number, email, password_hash, auth_provider, google_id, facebook_id,
-        full_name, display_name, gender, date_of_birth, city, country, avatar_url, account_type
+        full_name, display_name, gender, date_of_birth, city, country, avatar_url, account_type,
+        is_first_time_user, offer_used, offer_minutes_limit, offer_flat_price
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING user_id, phone_number, email, auth_provider, google_id, facebook_id, full_name, display_name, gender, 
-                city, country, avatar_url, account_type, created_at
+                city, country, avatar_url, account_type, is_first_time_user, offer_used, offer_minutes_limit, offer_flat_price, created_at
     `;
 
     const values = [
       phone_number, email, password_hash, auth_provider, google_id, facebook_id,
-      full_name, display_name, gender, date_of_birth, city, country, avatar_url, account_type
+      full_name, display_name, gender, date_of_birth, city, country, avatar_url, account_type,
+      is_first_time_user, offer_used, offer_minutes_limit, offer_flat_price
     ];
 
     const result = await pool.query(query, values);
@@ -109,7 +115,8 @@ class User {
     const query = `
       SELECT user_id, phone_number, email, auth_provider, google_id, facebook_id, full_name, display_name, gender,
              date_of_birth, city, country, avatar_url, bio, mobile_number, is_verified,
-             is_active, account_type, created_at, updated_at
+             is_active, account_type, is_first_time_user, offer_used, offer_minutes_limit, offer_flat_price,
+             created_at, updated_at
       FROM users 
       WHERE user_id = $1 AND is_active = TRUE
     `;
@@ -163,6 +170,17 @@ class User {
   static async updateLastSeen(user_id) {
     const query = 'UPDATE users SET last_seen = CURRENT_TIMESTAMP WHERE user_id = $1';
     await pool.query(query, [user_id]);
+  }
+
+  static async markOfferUsed(user_id) {
+    const query = `
+      UPDATE users
+      SET offer_used = TRUE, updated_at = CURRENT_TIMESTAMP
+      WHERE user_id = $1
+      RETURNING user_id, offer_used
+    `;
+    const result = await pool.query(query, [user_id]);
+    return result.rows[0];
   }
 
   // Verify user

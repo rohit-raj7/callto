@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Storage service for persisting data locally
@@ -23,6 +24,7 @@ class StorageService {
   static const String _mobileKey = 'mobile';
   static const String _deletedMessagesKey = 'deleted_messages'; // For local delete for me
   static const String _deletedForEveryoneKey = 'deleted_for_everyone'; // For delete for everyone placeholders
+  static const String _callRateConfigKey = 'call_rate_config';
   
     /// Save date of birth
     Future<void> saveDob(String dob) async {
@@ -47,6 +49,23 @@ class StorageService {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getString(_mobileKey);
     }
+
+  Future<void> saveCallRateConfig(Map<String, dynamic> config) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_callRateConfigKey, jsonEncode(config));
+  }
+
+  Future<Map<String, dynamic>?> getCallRateConfig() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_callRateConfigKey);
+    if (raw == null || raw.isEmpty) return null;
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) {
+      return decoded.map((key, value) => MapEntry(key.toString(), value));
+    }
+    return null;
+  }
   
   // Listener-specific keys
   static const String _listenerProfessionalNameKey = 'listener_professional_name';
