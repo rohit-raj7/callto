@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import '../models/recharge_pack_model.dart';
 import 'api_config.dart';
 import 'api_service.dart';
 
@@ -23,6 +24,20 @@ class PaymentService {
 
   void dispose() {
     razorpay_platform.disposeRazorpay();
+  }
+
+  Future<List<RechargePack>> getRechargePacks() async {
+    try {
+      final response = await _apiService.get(ApiConfig.rechargePacks);
+      if (response.isSuccess && response.data != null && response.data['success'] == true) {
+        final List<dynamic> data = response.data['data'];
+        return data.map((json) => RechargePack.fromJson(json)).toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error fetching recharge packs: $e');
+      return [];
+    }
   }
 
   Future<void> openCheckout({

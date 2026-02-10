@@ -93,4 +93,10 @@ export const getOutbox = (params = {}) => api.get('/notifications/outbox', { par
 export const updateOutbox = (id, payload) => api.put(`/notifications/outbox/${id}`, payload);
 export const deleteOutbox = (id) => api.delete(`/notifications/outbox/${id}`);
 
+// Recharge Pack methods
+export const getRechargePacks = () => api.get('/recharge-packs/all');
+export const createRechargePack = (payload) => api.post('/recharge-packs', payload);
+export const updateRechargePack = (id, payload) => api.put(`/recharge-packs/${id}`, payload);
+export const deleteRechargePack = (id) => api.delete(`/recharge-packs/${id}`);
+
 export default api;

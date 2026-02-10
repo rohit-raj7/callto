@@ -53,6 +53,7 @@ class ApiConfig {
 
   // Voice upload
   static final String uploadVoice = '$apiBase/listeners/upload-voice';
+  static final String rechargePacks = '$apiBase/recharge-packs';
 
   static final Duration timeout = const Duration(seconds: 60);
   static const int maxRetries = 3;

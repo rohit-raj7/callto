@@ -1,7 +1,13 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 import dotenv from 'dotenv';
-dotenv.config();
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // ============================================
 // DEVICE-TIME FIX: Override pg TIMESTAMP parser for correct timezone handling
@@ -22,8 +28,8 @@ pgTypes.setTypeParser(1114, function parseTimestampAsUTC(val) {
 });
 
 // Configure the PostgreSQL connection pool
-// Optimized for serverless environments
-const pool = new Pool({
+// Increased limits and timeouts to handle connection instability and high traffic
+const poolConfig = {
   ...(process.env.DATABASE_PUBLIC_URL
     ? { connectionString: process.env.DATABASE_PUBLIC_URL }
     : {
@@ -33,14 +39,22 @@ const pool = new Pool({
         password: process.env.DB_PASSWORD,
         database: process.env.DB_NAME
       }),
-  ssl: {
-    rejectUnauthorized: false // Required for AWS RDS/managed Postgres
-  },
-  max: 5, // Reduced for serverless - each function instance gets its own pool
-  idleTimeoutMillis: 10000, // Close idle connections faster in serverless
-  connectionTimeoutMillis: 10000,
-  // DEVICE-TIME FIX: Removed hardcoded timezone: 'Asia/Kolkata' — session
-  // timezone is set to UTC via pool.on('connect') below for consistency.
+  max: 20, // Increased from 5 to 20
+  idleTimeoutMillis: 30000, // Increased from 10s to 30s
+  connectionTimeoutMillis: 30000, // Increased from 10s to 30s
+};
+
+if (process.env.NODE_ENV === 'production' || process.env.DATABASE_PUBLIC_URL) {
+  poolConfig.ssl = {
+    rejectUnauthorized: false
+  };
+}
+
+const pool = new Pool(poolConfig);
+
+// Handle unexpected errors on idle clients
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle database client:', err.message);
 });
 
 // DEVICE-TIME FIX: Force all database sessions to UTC so CURRENT_TIMESTAMP

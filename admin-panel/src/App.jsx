@@ -17,6 +17,7 @@ import ListenerProfile from './pages/ListenerProfile';
 import ListenerRateSettings from './pages/ListenerRateSettings';
 import CallRateConfig from './pages/CallRateConfig';
 import SendNotification from './pages/SendNotification';
+import RechargePacks from './pages/RechargePacks';
 import PrivateRoute from './components/PrivateRoute';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -95,6 +96,15 @@ function App() {
                   <PrivateRoute>
                     <Layout>
                       <CallRateConfig />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/recharge-packs" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <RechargePacks />
                     </Layout>
                   </PrivateRoute>
                 </ThemeProvider>

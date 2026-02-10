@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../models/recharge_pack_model.dart';
 import '../../../services/payment_service.dart';
 import '../../../services/user_service.dart';
 import '../../../services/storage_service.dart';
@@ -11,35 +12,40 @@ class WalletScreen extends StatefulWidget {
 }
 
 class _WalletScreenState extends State<WalletScreen> {
-  int? _selectedIndex = 3;
+  int? _selectedIndex;
   final PaymentService _paymentService = PaymentService();
   final UserService _userService = UserService();
   final StorageService _storageService = StorageService();
   bool _isProcessing = false;
+  bool _isLoadingPacks = true;
   double _walletBalance = 0.0;
   String? _prefillEmail;
   String? _prefillContact;
+  List<RechargePack> _rechargePacks = [];
 
   static const double _taxRate = 0.31;
-
-  final List<Map<String, dynamic>> packs = [
-    {'amount': 25, 'extra': 0, 'badge': null},
-    {'amount': 50, 'extra': 6, 'badge': null},
-    {'amount': 100, 'extra': 15, 'badge': null},
-    {'amount': 140, 'extra': 20, 'badge': 'Value Pack'},
-    {'amount': 200, 'extra': 25, 'badge': null},
-    {'amount': 300, 'extra': 35, 'badge': 'Popular'},
-    {'amount': 500, 'extra': 35, 'badge': null},
-    {'amount': 900, 'extra': 35, 'badge': null},
-    {'amount': 1900, 'extra': 35, 'badge': null},
-    {'amount': 9800, 'extra': 35, 'badge': null},
-  ];
 
   @override
   void initState() {
     super.initState();
     _paymentService.initialize();
     _loadUserData();
+    _loadRechargePacks();
+  }
+
+  Future<void> _loadRechargePacks() async {
+    setState(() => _isLoadingPacks = true);
+    final packs = await _paymentService.getRechargePacks();
+    if (!mounted) return;
+    setState(() {
+      _rechargePacks = packs;
+      _isLoadingPacks = false;
+      if (_rechargePacks.isNotEmpty) {
+        _selectedIndex = (_rechargePacks.length / 2).floor();
+      } else {
+        _selectedIndex = null;
+      }
+    });
   }
 
   @override
@@ -65,6 +71,12 @@ class _WalletScreenState extends State<WalletScreen> {
   void _setProcessing(bool value) {
     if (!mounted) return;
     setState(() => _isProcessing = value);
+  }
+
+  bool get _hasValidSelection {
+    return _selectedIndex != null &&
+        _selectedIndex! >= 0 &&
+        _selectedIndex! < _rechargePacks.length;
   }
 
   @override
@@ -169,89 +181,115 @@ class _WalletScreenState extends State<WalletScreen> {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                  child: GridView.builder(
-                    itemCount: packs.length,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 2.5,
-                    ),
-                    itemBuilder: (context, index) {
-                      final pack = packs[index];
-                      final selected = _selectedIndex == index;
-
-                      return GestureDetector(
-                        onTap: () => setState(() => _selectedIndex = index),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? Colors.pink.shade50
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(14),
-                            border: selected
-                                ? Border.all(color: Colors.pink, width: 2)
-                                : null,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.grey.shade300,
-                                blurRadius: 8,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
+                  child: _isLoadingPacks
+                      ? const Center(child: CircularProgressIndicator())
+                      : _rechargePacks.isEmpty
+                          ? Center(
+                              child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    '₹${pack['amount']}',
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.pink,
-                                    ),
+                                  const Icon(Icons.info_outline,
+                                      size: 48, color: Colors.grey),
+                                  const SizedBox(height: 16),
+                                  const Text('No recharge packs available'),
+                                  TextButton(
+                                    onPressed: _loadRechargePacks,
+                                    child: const Text('Retry'),
                                   ),
-                                  if ((pack['extra'] as int) > 0)
-                                    Text(
-                                      '+${pack['extra']}% extra',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.green,
-                                      ),
-                                    ),
                                 ],
                               ),
-                              if (pack['badge'] != null)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.redAccent,
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Text(
-                                    pack['badge'],
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
+                            )
+                          : GridView.builder(
+                              itemCount: _rechargePacks.length,
+                              gridDelegate:
+                                  SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: crossAxisCount,
+                                mainAxisSpacing: 12,
+                                crossAxisSpacing: 12,
+                                childAspectRatio: 2.5,
+                              ),
+                              itemBuilder: (context, index) {
+                                final pack = _rechargePacks[index];
+                                final selected = _selectedIndex == index;
+
+                                return GestureDetector(
+                                  onTap: () =>
+                                      setState(() => _selectedIndex = index),
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 200),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 16),
+                                    decoration: BoxDecoration(
+                                      color: selected
+                                          ? Colors.pink.shade50
+                                          : Colors.white,
+                                      borderRadius: BorderRadius.circular(14),
+                                      border: selected
+                                          ? Border.all(
+                                              color: Colors.pink, width: 2)
+                                          : null,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.grey.shade300,
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              '₹${pack.amount.toStringAsFixed(0)}',
+                                              style: const TextStyle(
+                                                fontSize: 16,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.pink,
+                                              ),
+                                            ),
+                                            if (pack.extraPercentOrAmount > 0)
+                                              Text(
+                                                '+${pack.extraPercentOrAmount.toStringAsFixed(0)}% extra',
+                                                style: const TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.green,
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                        if (pack.badgeText != null)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.redAccent,
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Text(
+                                              pack.badgeText!,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                                );
+                              },
+                            ),
                 ),
               ),
 
@@ -277,8 +315,8 @@ class _WalletScreenState extends State<WalletScreen> {
               ),
               child: Center(
                 child: Text(
-                  _selectedIndex != null && (packs[_selectedIndex!]['extra'] as int) > 0
-                      ? 'Get ₹${((packs[_selectedIndex!]['amount'] as int) * (packs[_selectedIndex!]['extra'] as int) / 100).toStringAsFixed(0)} Extra cashback on this pack'
+                  _hasValidSelection && _rechargePacks[_selectedIndex!].extraPercentOrAmount > 0
+                      ? 'Get ₹${(_rechargePacks[_selectedIndex!].amount * _rechargePacks[_selectedIndex!].extraPercentOrAmount / 100).toStringAsFixed(0)} Extra cashback on this pack'
                       : 'Select a pack to see cashback',
                   style: const TextStyle(color: Colors.green),
                 ),
@@ -295,17 +333,17 @@ class _WalletScreenState extends State<WalletScreen> {
                     borderRadius: BorderRadius.circular(28),
                   ),
                 ),
-                onPressed: _isProcessing
+                onPressed: _isProcessing || _isLoadingPacks || _rechargePacks.isEmpty || !_hasValidSelection
                     ? null
                     : () {
-                        if (_selectedIndex == null) {
+                        if (!_hasValidSelection) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Please select a pack')),
                           );
                           return;
                         }
-                        final selected = packs[_selectedIndex!];
-                        final amount = (selected['amount'] as int).toDouble();
+                        final selected = _rechargePacks[_selectedIndex!];
+                        final amount = selected.amount;
                         final taxDisplay = (amount * _taxRate * 100).round() / 100;
                         final payableAmount = ((amount + taxDisplay) * 100).round() / 100;
                         _initiateRazorpayPayment(amount, payableAmount);
@@ -448,8 +486,9 @@ class _WalletScreenState extends State<WalletScreen> {
             TextButton(
               onPressed: () {
                 Navigator.pop(dialogCtx);
-                if (_selectedIndex != null) {
-                  final amount = (packs[_selectedIndex!]['amount'] as int).toDouble();
+                if (_hasValidSelection) {
+                  final selected = _rechargePacks[_selectedIndex!];
+                  final amount = selected.amount;
                   final taxDisplay = (amount * _taxRate * 100).round() / 100;
                   final payableAmount = ((amount + taxDisplay) * 100).round() / 100;
                   _initiateRazorpayPayment(amount, payableAmount);
