@@ -212,8 +212,10 @@ class User {
   static async getWallet(user_id) {
     const query = 'SELECT * FROM wallets WHERE user_id = $1';
     const result = await pool.query(query, [user_id]);
-    
-    // Create wallet if doesn't exist
+
+    let wallet;
+
+    // Create wallet if it doesn't exist
     if (result.rows.length === 0) {
       const createQuery = `
         INSERT INTO wallets (user_id, balance)
@@ -221,10 +223,33 @@ class User {
         RETURNING *
       `;
       const createResult = await pool.query(createQuery, [user_id]);
-      return createResult.rows[0];
+      wallet = createResult.rows[0];
+    } else {
+      wallet = result.rows[0];
     }
-    
-    return result.rows[0];
+
+    const transactionQuery = `
+      SELECT
+        transaction_id,
+        transaction_type,
+        amount,
+        currency,
+        description,
+        payment_method,
+        payment_gateway_id,
+        status,
+        related_call_id,
+        created_at
+      FROM transactions
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+    `;
+    const transactionResult = await pool.query(transactionQuery, [user_id]);
+
+    return {
+      ...wallet,
+      transactions: transactionResult.rows,
+    };
   }
 
   // Add balance to user wallet

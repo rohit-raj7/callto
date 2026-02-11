@@ -3,6 +3,7 @@ import '../../../models/recharge_pack_model.dart';
 import '../../../services/payment_service.dart';
 import '../../../services/user_service.dart';
 import '../../../services/storage_service.dart';
+import 'my_transaction.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
@@ -114,7 +115,15 @@ class _WalletScreenState extends State<WalletScreen> {
                           TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                     ),
                     TextButton.icon(
-                      onPressed: () {},
+                      onPressed: () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const TransactionScreen(),
+                          ),
+                        );
+                        _loadUserData();
+                      },
                       icon: const Icon(Icons.swap_vert, color: Colors.pink),
                       label: const Text(
                         'Transactions',

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'profile/contact.dart';
+import 'profile/my_transaction.dart';
 import 'profile/wallet.dart'; 
 import '../screens/recents_screen.dart';
 import 'profile/setting.dart';
