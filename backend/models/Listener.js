@@ -751,14 +751,172 @@ class Listener {
     return result.rows[0]?.is_busy === true;
   }
 
-  // Delete listener and all related data
+  // Delete listener and all related data (including associated user account)
   static async delete(listener_id) {
-    const query = `
-      DELETE FROM listeners 
-      WHERE listener_id = $1
-    `;
-    const result = await pool.query(query, [listener_id]);
-    return result.rowCount > 0;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // 1. Get the associated user_id before deleting
+      const listenerResult = await client.query(
+        'SELECT user_id FROM listeners WHERE listener_id = $1',
+        [listener_id]
+      );
+      if (listenerResult.rowCount === 0) {
+        await client.query('ROLLBACK');
+        return false;
+      }
+      const user_id = listenerResult.rows[0].user_id;
+
+      // 2. Delete call billing audit records referencing this listener
+      await client.query(
+        'DELETE FROM call_billing_audit WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 3. Delete call records referencing this listener
+      await client.query(
+        'DELETE FROM call_records WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 4. Delete calls where this listener was involved
+      await client.query(
+        'DELETE FROM calls WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 5. Delete ratings for this listener (CASCADE should handle, but explicit for safety)
+      await client.query(
+        'DELETE FROM ratings WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 6. Delete favorites referencing this listener
+      await client.query(
+        'DELETE FROM favorites WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 7. Delete listener payment details
+      await client.query(
+        'DELETE FROM listener_payment_details WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 8. Delete listener availability
+      await client.query(
+        'DELETE FROM listener_availability WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 9. Delete the listener row itself
+      await client.query(
+        'DELETE FROM listeners WHERE listener_id = $1',
+        [listener_id]
+      );
+
+      // 10. If there is an associated user account, delete all user-related data too
+      if (user_id) {
+        // Delete notification deliveries for this user
+        await client.query(
+          'DELETE FROM notification_deliveries WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete contact messages by this user
+        await client.query(
+          'DELETE FROM contact_messages WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete delete account requests by this user
+        await client.query(
+          'DELETE FROM delete_account_requests WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete notifications for this user
+        await client.query(
+          'DELETE FROM notifications WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete transactions for this user
+        await client.query(
+          'DELETE FROM transactions WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete messages sent by this user
+        await client.query(
+          'DELETE FROM messages WHERE sender_id = $1',
+          [user_id]
+        );
+
+        // Delete chats involving this user
+        await client.query(
+          'DELETE FROM chats WHERE user1_id = $1 OR user2_id = $1',
+          [user_id]
+        );
+
+        // Delete blocked users records
+        await client.query(
+          'DELETE FROM blocked_users WHERE blocker_id = $1 OR blocked_id = $1',
+          [user_id]
+        );
+
+        // Delete reports by or about this user
+        await client.query(
+          'DELETE FROM reports WHERE reporter_id = $1 OR reported_user_id = $1',
+          [user_id]
+        );
+
+        // Delete user languages
+        await client.query(
+          'DELETE FROM user_languages WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete wallet
+        await client.query(
+          'DELETE FROM wallets WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete any remaining calls by this user as caller
+        await client.query(
+          'DELETE FROM calls WHERE caller_id = $1',
+          [user_id]
+        );
+
+        // Delete call records by this user
+        await client.query(
+          'DELETE FROM call_records WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Delete call billing audit by this user
+        await client.query(
+          'DELETE FROM call_billing_audit WHERE user_id = $1',
+          [user_id]
+        );
+
+        // Finally, delete the user account itself
+        await client.query(
+          'DELETE FROM users WHERE user_id = $1',
+          [user_id]
+        );
+      }
+
+      await client.query('COMMIT');
+      return true;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }
 

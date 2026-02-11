@@ -366,7 +366,7 @@ router.put('/:listener_id', authenticate, async (req, res) => {
 });
 
 // DELETE /api/listeners/:listener_id
-// Delete listener (admin only)
+// Delete listener and all related data including user account (admin only)
 router.delete('/:listener_id', authenticateAdmin, async (req, res) => {
   try {
     const listener = await Listener.findById(req.params.listener_id);
@@ -379,7 +379,7 @@ router.delete('/:listener_id', authenticateAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Listener not found' });
     }
 
-    res.json({ message: 'Listener deleted successfully' });
+    res.json({ message: 'Listener and all associated data deleted successfully' });
   } catch (error) {
     console.error('Delete listener error:', error);
     res.status(500).json({ error: 'Failed to delete listener' });

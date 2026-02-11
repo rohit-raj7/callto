@@ -958,7 +958,7 @@ const ListenersManagement = () => {
 
       {deletingListener && (
         <ConfirmationModal
-          message={`Are you sure you want to delete "${deletingListener.name}"? This action cannot be undone.`}
+          message={`Are you sure you want to permanently delete "${deletingListener.name}"? This will remove ALL data including their user account, email, contacts, calls, ratings, wallet, and chat history. This action cannot be undone.`}
           onConfirm={async () => {
             await deleteListener(deletingListener.listener_id);
             setDeletingListener(null);
