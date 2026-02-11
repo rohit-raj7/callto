@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'profile/contact.dart';
-import 'profile/transacions.dart'; 
+import 'profile/wallet.dart'; 
 import '../screens/recents_screen.dart';
 import 'profile/setting.dart';
 import 'profile/language.dart';
@@ -530,14 +530,25 @@ class _ProfilePageState extends State<ProfilePage> {
               );
             },
           ),
-
-          _buildListTile(
+           _buildListTile(
             Icons.swap_horiz,
-            "Transactions",
+            "My Wallet",
             onTap: () async {
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const WalletScreen()),
+              );
+              // Reload wallet balance when returning
+              _loadUserData();
+            },
+          ),
+          _buildListTile(
+            Icons.swap_horiz,
+            "My Transactions",
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const TransactionScreen()),
               );
               // Reload wallet balance when returning
               _loadUserData();

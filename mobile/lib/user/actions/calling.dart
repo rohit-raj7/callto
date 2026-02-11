@@ -3,8 +3,7 @@ import 'call_controller.dart';
 import 'audio_device_manager.dart';
 import 'call_action_button.dart';
 import 'audio_route_bottom_sheet.dart';
-import '../../services/call_service.dart';
-import '../nav/profile/transacions.dart';
+import '../nav/profile/wallet.dart';
 import '../screens/listener_rating.dart';
 
 /// ──────────────────────────────────────────────────────────────────
@@ -54,7 +53,6 @@ class _CallingState extends State<Calling>
     with WidgetsBindingObserver, TickerProviderStateMixin {
   late final UserCallController _controller;
   late final AnimationController _pulseController;
-  bool _summaryShown = false;
   bool _handledBalanceError = false;
   bool _hadConnected = false;
   bool _ratingShown = false;
@@ -134,12 +132,7 @@ class _CallingState extends State<Calling>
       // Wait for cleanup to finish, then navigate
       _controller.endCallFuture.then((_) {
         if (!mounted) return;
-        if (_controller.billingSummary != null && !_summaryShown) {
-          _summaryShown = true;
-          _showBillingSummary(_controller.billingSummary!);
-        } else {
-          _openRatingOrClose();
-        }
+        _openRatingOrClose();
       });
     }
 
@@ -148,64 +141,6 @@ class _CallingState extends State<Calling>
 
   void _onAudioChanged() {
     if (mounted) setState(() {});
-  }
-
-  Future<void> _showBillingSummary(CallBillingSummary summary) async {
-    if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isDismissible: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: const BoxDecoration(
-            color: Color(0xFF0F172A),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Call Summary',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 12),
-              _summaryRow('Duration', '${summary.durationSeconds}s'),
-              _summaryRow('Billed Minutes', summary.minutes.toString()),
-              _summaryRow('Total Charge', '₹${summary.userCharge.toStringAsFixed(2)}'),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.pinkAccent,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Done',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (mounted) {
-      _openRatingOrClose();
-    }
   }
 
   bool _shouldOpenRating() {
@@ -234,19 +169,6 @@ class _CallingState extends State<Calling>
     Future.delayed(const Duration(milliseconds: 400), () {
       if (mounted) Navigator.pop(context);
     });
-  }
-
-  Widget _summaryRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.white70)),
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
   }
 
   @override
@@ -278,12 +200,7 @@ class _CallingState extends State<Calling>
       );
     }
 
-    if (_controller.billingSummary != null && !_summaryShown) {
-      _summaryShown = true;
-      _showBillingSummary(_controller.billingSummary!);
-    } else {
-      _openRatingOrClose();
-    }
+    _openRatingOrClose();
   }
 
   @override

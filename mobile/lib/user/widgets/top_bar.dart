@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../nav/profile.dart';
-import '../nav/profile/transacions.dart';
+import '../nav/profile/wallet.dart';
 import '../../services/storage_service.dart';
 import '../../services/user_service.dart';
 

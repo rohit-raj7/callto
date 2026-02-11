@@ -15,7 +15,8 @@ class RandomCallScreen extends StatefulWidget {
   State<RandomCallScreen> createState() => _RandomCallScreenState();
 }
 
-class _RandomCallScreenState extends State<RandomCallScreen> with TickerProviderStateMixin {
+class _RandomCallScreenState extends State<RandomCallScreen>
+    with TickerProviderStateMixin {
   bool isSearching = false;
   Map<String, String>? matchedUser;
   final SocketService _socketService = SocketService();
@@ -25,7 +26,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
 
   late AnimationController _pulseController;
   late AnimationController _orbitController;
-  
+
   // Female profile avatars for the visual effect
   final List<String> _dummyAvatars = [
     'assets/images/female_profile/avatar2.jpg',
@@ -87,27 +88,27 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
 
     // Minimum search animation time for better UX
     final minSearchTime = Future.delayed(const Duration(seconds: 2));
-    
+
     try {
       // Ensure socket is connected to get real-time online status
       await _socketService.connect();
-      
+
       int maxRetries = 3;
       int retryCount = 0;
       List<model.Listener> onlineListeners = [];
-      
+
       // Retry logic to find online listeners
       while (retryCount < maxRetries && onlineListeners.isEmpty) {
         // Fetch listeners marked as online from API
         final result = await _listenerService.getListeners(
-          isOnline: true, 
-          limit: 50,  // Fetch more to increase chances
+          isOnline: true,
+          limit: 50, // Fetch more to increase chances
         );
-        
+
         if (result.success && result.listeners.isNotEmpty) {
           // Get real-time online status from socket
           final socketOnlineMap = _socketService.listenerOnlineMap;
-          
+
           // Filter listeners who are confirmed online via socket
           onlineListeners = result.listeners.where((listener) {
             // Check if listener is online in socket map
@@ -117,13 +118,13 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
             }
             return socketOnlineMap[listener.userId] == true;
           }).toList();
-          
+
           // If no socket-confirmed online listeners, use API result
           if (onlineListeners.isEmpty && result.listeners.isNotEmpty) {
             onlineListeners = result.listeners;
           }
         }
-        
+
         if (onlineListeners.isEmpty) {
           retryCount++;
           if (retryCount < maxRetries) {
@@ -131,15 +132,15 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
           }
         }
       }
-      
+
       // Wait for minimum search time
       await minSearchTime;
-      
+
       if (onlineListeners.isNotEmpty) {
         // Shuffle and pick random listener
         onlineListeners.shuffle();
         final randomListener = onlineListeners.first;
-        
+
         await _stopSearchSound();
         setState(() {
           isSearching = false;
@@ -148,8 +149,12 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
             'listener_id': randomListener.listenerId,
             'name': randomListener.professionalName ?? 'Unknown',
             'city': randomListener.city ?? 'Unknown',
-            'topic': randomListener.specialties.isNotEmpty ? randomListener.specialties.first : 'General',
-            'image': randomListener.avatarUrl ?? 'assets/images/female_profile/avatar2.jpg',
+            'topic': randomListener.specialties.isNotEmpty
+                ? randomListener.specialties.first
+                : 'General',
+            'image':
+                randomListener.avatarUrl ??
+                'assets/images/female_profile/avatar2.jpg',
           };
         });
       } else {
@@ -161,7 +166,9 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No Experts online right now. Please try again later.'),
+              content: Text(
+                'No Experts online right now. Please try again later.',
+              ),
               backgroundColor: Colors.orange,
             ),
           );
@@ -189,7 +196,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
   void startCall(Map<String, String> user) async {
     // Connect to socket and wait for connection
     final connected = await _socketService.connect();
-    
+
     if (!connected) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -198,32 +205,34 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
       }
       return;
     }
-    
+
     // Get current user info
     final userName = await _storage.getDisplayName() ?? 'You';
     final userAvatar = await _storage.getAvatarUrl();
     final userGender = await _storage.getGender();
-    
+
     final listenerId = user['id'];
-    
+
     // Create call record in database first
     final callService = CallService();
     final callResult = await callService.initiateCall(
       listenerId: user['listener_id'] ?? listenerId ?? '',
       callType: 'audio',
     );
-    
+
     if (!callResult.success) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(callResult.error ?? 'Failed to initiate call')),
+          SnackBar(
+            content: Text(callResult.error ?? 'Failed to initiate call'),
+          ),
         );
       }
       return;
     }
-    
+
     final callId = callResult.call!.callId;
-    
+
     // Notify listener via socket
     if (listenerId != null) {
       print('Caller: Initiating call to Experts userId: $listenerId');
@@ -238,9 +247,9 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
     } else {
       print('Warning: No Experts userId available for call');
     }
-    
+
     if (!mounted) return;
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -256,54 +265,81 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
     );
   }
 
+  void _handleBack() {
+    _stopSearchSound();
+    if (isSearching) {
+      setState(() {
+        isSearching = false;
+        matchedUser = null;
+      });
+    }
+    Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    
-    return Scaffold(
-      extendBodyBehindAppBar: true,
-      backgroundColor: const Color(0xFF0B1220),
-      appBar: AppBar(
-        leading: IconButton(
-          icon: Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
-              shape: BoxShape.circle,
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _handleBack();
+        }
+      },
+      child: Scaffold(
+        extendBodyBehindAppBar: true,
+        backgroundColor: const Color(0xFF0B1220),
+        appBar: AppBar(
+          leading: IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.arrow_back_ios_new,
+                color: Colors.white,
+                size: 18,
+              ),
             ),
-            child: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 18),
+            onPressed: _handleBack,
           ),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          "Random Match",
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 0.4),
-        ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0B1220), Color(0xFF111827), Color(0xFF312E81)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+          title: const Text(
+            "Random Match",
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.4,
+            ),
           ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          centerTitle: true,
         ),
-        child: SafeArea(
-          bottom: true,
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 500),
-            switchInCurve: Curves.easeOutBack,
-            switchOutCurve: Curves.easeIn,
-            child: isSearching
-                ? _orbitSearchingView(size)
-                : matchedUser != null
-                    ? _matchedCard(matchedUser!, size)
-                    : _idleView(size),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF0B1220), Color(0xFF111827), Color(0xFF312E81)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SafeArea(
+            bottom: true,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 500),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeIn,
+              child: isSearching
+                  ? _orbitSearchingView(size)
+                  : matchedUser != null
+                  ? _matchedCard(matchedUser!, size)
+                  : _idleView(size),
+            ),
           ),
         ),
       ),
@@ -316,13 +352,17 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
     final circleSize = size.width * 0.4;
     final maxCircleSize = circleSize > 180 ? 180.0 : circleSize;
     final iconSize = maxCircleSize * 0.44;
-    
+
     return SingleChildScrollView(
       key: const ValueKey('idle'),
       physics: const BouncingScrollPhysics(),
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          minHeight: size.height - MediaQuery.of(context).padding.top - kToolbarHeight - MediaQuery.of(context).padding.bottom,
+          minHeight:
+              size.height -
+              MediaQuery.of(context).padding.top -
+              kToolbarHeight -
+              MediaQuery.of(context).padding.bottom,
         ),
         child: Padding(
           padding: EdgeInsets.symmetric(
@@ -342,12 +382,18 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                     animation: _pulseController,
                     builder: (context, child) {
                       return Container(
-                        width: maxCircleSize * 1.55 + (_pulseController.value * 40),
-                        height: maxCircleSize * 1.55 + (_pulseController.value * 40),
+                        width:
+                            maxCircleSize * 1.55 +
+                            (_pulseController.value * 40),
+                        height:
+                            maxCircleSize * 1.55 +
+                            (_pulseController.value * 40),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: Colors.pinkAccent.withOpacity(0.1 - (_pulseController.value * 0.1)),
+                            color: Colors.pinkAccent.withOpacity(
+                              0.1 - (_pulseController.value * 0.1),
+                            ),
                             width: 1,
                           ),
                         ),
@@ -358,8 +404,12 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                     animation: _pulseController,
                     builder: (context, child) {
                       return Container(
-                        width: maxCircleSize * 1.22 + (_pulseController.value * 30),
-                        height: maxCircleSize * 1.22 + (_pulseController.value * 30),
+                        width:
+                            maxCircleSize * 1.22 +
+                            (_pulseController.value * 30),
+                        height:
+                            maxCircleSize * 1.22 +
+                            (_pulseController.value * 30),
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.pinkAccent.withOpacity(0.05),
@@ -431,7 +481,11 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.verified_rounded, color: Colors.white.withOpacity(0.8), size: size.width * 0.04),
+                    Icon(
+                      Icons.verified_rounded,
+                      color: Colors.white.withOpacity(0.8),
+                      size: size.width * 0.04,
+                    ),
                     SizedBox(width: size.width * 0.02),
                     Text(
                       "Verified Experts only",
@@ -473,7 +527,11 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.mic, color: Colors.white, size: size.width * 0.052),
+                        Icon(
+                          Icons.mic,
+                          color: Colors.white,
+                          size: size.width * 0.052,
+                        ),
                         SizedBox(width: size.width * 0.02),
                         Text(
                           "Start Matching",
@@ -501,7 +559,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
   Widget _orbitSearchingView(Size size) {
     final baseRadius = size.width * 0.2;
     final avatarRadius = size.width * 0.045;
-    
+
     return SizedBox(
       key: const ValueKey('searching'),
       width: double.infinity,
@@ -511,7 +569,8 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
         children: [
           // Background Radar Circles
           ...List.generate(4, (index) {
-            final double radarSize = (baseRadius * 1.5) + (index * baseRadius * 0.8);
+            final double radarSize =
+                (baseRadius * 1.5) + (index * baseRadius * 0.8);
             return Container(
               width: radarSize,
               height: radarSize,
@@ -534,15 +593,22 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 children: _dummyAvatars.asMap().entries.map((entry) {
                   final index = entry.key;
                   final imagePath = entry.value;
-                  
+
                   // Calculate different orbit paths - responsive
-                  final double radius = baseRadius + ((index % 3) * baseRadius * 0.6);
+                  final double radius =
+                      baseRadius + ((index % 3) * baseRadius * 0.6);
                   final double speed = 1.0 + ((index % 3) * 0.5);
                   final bool clockwise = index % 2 == 0;
-                  
-                  final double initialAngle = (index * (2 * math.pi / _dummyAvatars.length));
-                  final double currentAngle = initialAngle + 
-                      (_orbitController.value * 2 * math.pi * speed * (clockwise ? 1 : -1));
+
+                  final double initialAngle =
+                      (index * (2 * math.pi / _dummyAvatars.length));
+                  final double currentAngle =
+                      initialAngle +
+                      (_orbitController.value *
+                          2 *
+                          math.pi *
+                          speed *
+                          (clockwise ? 1 : -1));
 
                   return Transform.translate(
                     offset: Offset(
@@ -553,7 +619,10 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                       padding: const EdgeInsets.all(2),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1.5),
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.5),
+                          width: 1.5,
+                        ),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.pinkAccent.withOpacity(0.3),
@@ -638,7 +707,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
   Widget _matchedCard(Map<String, String> user, Size size) {
     final avatarRadius = size.width * 0.13;
     final maxAvatarRadius = avatarRadius > 60 ? 60.0 : avatarRadius;
-    
+
     return SingleChildScrollView(
       key: const ValueKey('matched'),
       physics: const BouncingScrollPhysics(),
@@ -683,7 +752,11 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: size.width * 0.038),
+                    Icon(
+                      Icons.check_circle_rounded,
+                      color: Colors.greenAccent,
+                      size: size.width * 0.038,
+                    ),
                     SizedBox(width: size.width * 0.02),
                     Text(
                       "Match Found!",
@@ -697,7 +770,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 ),
               ),
               SizedBox(height: size.height * 0.025),
-              
+
               // Avatar with Glow
               Container(
                 padding: const EdgeInsets.all(4),
@@ -721,7 +794,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 ),
               ),
               SizedBox(height: size.height * 0.02),
-              
+
               // User Details
               Text(
                 user['name']!,
@@ -736,7 +809,11 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.location_on, color: Colors.white.withOpacity(0.6), size: size.width * 0.04),
+                  Icon(
+                    Icons.location_on,
+                    color: Colors.white.withOpacity(0.6),
+                    size: size.width * 0.04,
+                  ),
                   SizedBox(width: size.width * 0.01),
                   Text(
                     user['city']!,
@@ -748,7 +825,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 ],
               ),
               SizedBox(height: size.height * 0.02),
-              
+
               // Tags
               Container(
                 padding: EdgeInsets.symmetric(
@@ -763,7 +840,11 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.topic_rounded, color: const Color(0xFF8B5CF6), size: size.width * 0.045),
+                    Icon(
+                      Icons.topic_rounded,
+                      color: const Color(0xFF8B5CF6),
+                      size: size.width * 0.045,
+                    ),
                     SizedBox(width: size.width * 0.02),
                     Text(
                       user['topic']!,
@@ -777,7 +858,7 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                 ),
               ),
               SizedBox(height: size.height * 0.03),
-              
+
               // Actions
               SizedBox(
                 width: double.infinity,
@@ -787,7 +868,9 @@ class _RandomCallScreenState extends State<RandomCallScreen> with TickerProvider
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFFEC4899),
                     foregroundColor: Colors.white,
-                    padding: EdgeInsets.symmetric(vertical: size.height * 0.015),
+                    padding: EdgeInsets.symmetric(
+                      vertical: size.height * 0.015,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
                     ),

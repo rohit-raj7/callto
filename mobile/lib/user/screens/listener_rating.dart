@@ -45,16 +45,22 @@ class _ListenerRatingScreenState extends State<ListenerRatingScreen>
     super.dispose();
   }
 
-  Future<void> _submitRating(double value) async {
+  void _updateRating(double value) {
     if (_isSubmitting) return;
     setState(() {
       _rating = value;
+    });
+  }
+
+  Future<void> _submitRating() async {
+    if (_isSubmitting || _rating <= 0) return;
+    setState(() {
       _isSubmitting = true;
     });
 
     final result = await _callService.submitRating(
       callId: widget.callId,
-      rating: value,
+      rating: _rating,
     );
 
     if (!mounted) return;
@@ -160,7 +166,7 @@ class _ListenerRatingScreenState extends State<ListenerRatingScreen>
                         const SizedBox(height: 22),
                         _StarRating(
                           value: _rating,
-                          onChanged: _isSubmitting ? null : _submitRating,
+                          onChanged: _isSubmitting ? null : _updateRating,
                         ),
                         const SizedBox(height: 12),
                         Text(
@@ -174,17 +180,25 @@ class _ListenerRatingScreenState extends State<ListenerRatingScreen>
                           ),
                         ),
                         const SizedBox(height: 18),
-                        if (_isSubmitting)
-                          const SizedBox(
-                            height: 24,
-                            width: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          )
-                        else
-                          TextButton(
-                            onPressed: _skipRating,
-                            child: const Text('Skip'),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed:
+                                (_isSubmitting || _rating == 0) ? null : _submitRating,
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                                  )
+                                : const Text('Submit'),
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: _isSubmitting ? null : _skipRating,
+                          child: const Text('Skip'),
+                        ),
                       ],
                     ),
                   ),
