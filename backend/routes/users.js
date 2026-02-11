@@ -148,24 +148,44 @@ router.get('/wallet', authenticate, async (req, res) => {
 // Add balance to wallet after successful payment
 router.post('/wallet/add', authenticate, async (req, res) => {
   try {
-    const { amount, payment_id, payment_method, description } = req.body;
+    const { amount, payment_id, payment_method, description, pack_id } = req.body;
     const parsedAmount = Number(amount);
 
     if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({ error: 'Valid amount is required' });
     }
 
+    // Calculate extra bonus from recharge pack
+    let bonusAmount = 0;
+    if (pack_id) {
+      const packResult = await pool.query(
+        'SELECT extra_percent_or_amount FROM recharge_packs WHERE id = $1 AND is_active = TRUE',
+        [pack_id]
+      );
+      if (packResult.rows.length > 0) {
+        const extraPercent = Number(packResult.rows[0].extra_percent_or_amount) || 0;
+        bonusAmount = Number((parsedAmount * extraPercent / 100).toFixed(2));
+      }
+    }
+
+    const totalCredit = Number((parsedAmount + bonusAmount).toFixed(2));
+
     const paymentDetails = {
       payment_id,
       payment_method: payment_method || 'razorpay',
-      description: description || 'Wallet recharge',
+      description: bonusAmount > 0
+        ? `Wallet recharge ₹${parsedAmount} + ₹${bonusAmount} extra bonus`
+        : description || 'Wallet recharge',
       currency: 'INR'
     };
 
-    const wallet = await User.addBalance(req.userId, parsedAmount, paymentDetails);
+    const wallet = await User.addBalance(req.userId, totalCredit, paymentDetails);
     res.json({
       message: 'Balance added successfully',
       balance: wallet.balance,
+      base_amount: parsedAmount,
+      bonus_amount: bonusAmount,
+      total_credited: totalCredit,
     });
   } catch (error) {
     console.error('Add balance error:', error);

@@ -24,8 +24,6 @@ class _WalletScreenState extends State<WalletScreen> {
   String? _prefillContact;
   List<RechargePack> _rechargePacks = [];
 
-  static const double _taxRate = 0.31;
-
   @override
   void initState() {
     super.initState();
@@ -325,9 +323,12 @@ class _WalletScreenState extends State<WalletScreen> {
               child: Center(
                 child: Text(
                   _hasValidSelection && _rechargePacks[_selectedIndex!].extraPercentOrAmount > 0
-                      ? 'Get ₹${(_rechargePacks[_selectedIndex!].amount * _rechargePacks[_selectedIndex!].extraPercentOrAmount / 100).toStringAsFixed(0)} Extra cashback on this pack'
-                      : 'Select a pack to see cashback',
-                  style: const TextStyle(color: Colors.green),
+                      ? 'Pay ₹${_rechargePacks[_selectedIndex!].amount.toStringAsFixed(0)} → Get ₹${(_rechargePacks[_selectedIndex!].amount + _rechargePacks[_selectedIndex!].amount * _rechargePacks[_selectedIndex!].extraPercentOrAmount / 100).toStringAsFixed(2)} in wallet (+₹${(_rechargePacks[_selectedIndex!].amount * _rechargePacks[_selectedIndex!].extraPercentOrAmount / 100).toStringAsFixed(2)} extra)'
+                      : _hasValidSelection
+                          ? 'Pay ₹${_rechargePacks[_selectedIndex!].amount.toStringAsFixed(0)} → Get ₹${_rechargePacks[_selectedIndex!].amount.toStringAsFixed(2)} in wallet'
+                          : 'Select a pack to add balance',
+                  style: const TextStyle(color: Colors.green, fontSize: 13),
+                  textAlign: TextAlign.center,
                 ),
               ),
             ),
@@ -353,9 +354,7 @@ class _WalletScreenState extends State<WalletScreen> {
                         }
                         final selected = _rechargePacks[_selectedIndex!];
                         final amount = selected.amount;
-                        final taxDisplay = (amount * _taxRate * 100).round() / 100;
-                        final payableAmount = ((amount + taxDisplay) * 100).round() / 100;
-                        _initiateRazorpayPayment(amount, payableAmount);
+                        _initiateRazorpayPayment(amount, amount, selected);
                       },
                 child: _isProcessing
                     ? const SizedBox(
@@ -375,7 +374,7 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   // ===== Razorpay Payment Flow =====
-  void _initiateRazorpayPayment(double rechargeAmount, double payableAmount) {
+  void _initiateRazorpayPayment(double rechargeAmount, double payableAmount, RechargePack selectedPack) {
     final amountInPaise = (payableAmount * 100).round();
     _setProcessing(true);
 
@@ -389,7 +388,7 @@ class _WalletScreenState extends State<WalletScreen> {
       onSuccess: (response) {
         _setProcessing(false);
         final paymentId = response?.paymentId?.toString() ?? 'N/A';
-        _onPaymentSuccess(paymentId, rechargeAmount);
+        _onPaymentSuccess(paymentId, rechargeAmount, selectedPack);
       },
       onError: (error) {
         _setProcessing(false);
@@ -414,21 +413,26 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  Future<void> _onPaymentSuccess(String paymentId, double rechargeAmount) async {
-    final result = await _userService.addBalance(rechargeAmount, paymentId: paymentId);
+  Future<void> _onPaymentSuccess(String paymentId, double rechargeAmount, RechargePack selectedPack) async {
+    final result = await _userService.addBalance(
+      rechargeAmount,
+      paymentId: paymentId,
+      packId: selectedPack.id,
+    );
     if (!mounted) return;
 
     if (result.success) {
       setState(() {
         _walletBalance = result.balance;
       });
-      _showSuccessDialog(paymentId, rechargeAmount);
+      _showSuccessDialog(paymentId, rechargeAmount, result.bonusAmount, result.totalCredited);
     } else {
       _showFailureDialog('Payment received but wallet sync failed. Please contact support.');
     }
   }
 
-  void _showSuccessDialog(String paymentId, double amount) {
+  void _showSuccessDialog(String paymentId, double amount, double bonusAmount, double totalCredited) {
+    final hasBonus = bonusAmount > 0;
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -443,8 +447,19 @@ class _WalletScreenState extends State<WalletScreen> {
               const Text('Payment Successful!',
                   style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.green)),
               const SizedBox(height: 10),
-              Text('₹${amount.toStringAsFixed(2)} added to your wallet',
-                  style: const TextStyle(fontSize: 15, color: Colors.black54)),
+              if (hasBonus) ...[
+                Text(
+                  '₹${amount.toStringAsFixed(2)} + ₹${bonusAmount.toStringAsFixed(2)} extra',
+                  style: const TextStyle(fontSize: 15, color: Colors.black87, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Total ₹${totalCredited.toStringAsFixed(2)} added to your wallet',
+                  style: const TextStyle(fontSize: 14, color: Colors.green, fontWeight: FontWeight.w500),
+                ),
+              ] else
+                Text('₹${amount.toStringAsFixed(2)} added to your wallet',
+                    style: const TextStyle(fontSize: 15, color: Colors.black54)),
               const SizedBox(height: 8),
               Text('Transaction ID: $paymentId',
                   style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -498,9 +513,7 @@ class _WalletScreenState extends State<WalletScreen> {
                 if (_hasValidSelection) {
                   final selected = _rechargePacks[_selectedIndex!];
                   final amount = selected.amount;
-                  final taxDisplay = (amount * _taxRate * 100).round() / 100;
-                  final payableAmount = ((amount + taxDisplay) * 100).round() / 100;
-                  _initiateRazorpayPayment(amount, payableAmount);
+                  _initiateRazorpayPayment(amount, amount, selected);
                 }
               },
               child: const Text('Retry', style: TextStyle(color: Colors.pink)),

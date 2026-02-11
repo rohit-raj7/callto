@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
-class ProfileSkeletonScreen extends StatefulWidget {
-  const ProfileSkeletonScreen({super.key});
+/// Skeleton shimmer widget for the profile card only.
+/// Drop this into the profile page in place of the profile card while loading.
+class ProfileCardSkeleton extends StatefulWidget {
+  const ProfileCardSkeleton({super.key});
 
   @override
-  State<ProfileSkeletonScreen> createState() => _ProfileSkeletonScreenState();
+  State<ProfileCardSkeleton> createState() => _ProfileCardSkeletonState();
 }
 
-class _ProfileSkeletonScreenState extends State<ProfileSkeletonScreen>
+class _ProfileCardSkeletonState extends State<ProfileCardSkeleton>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _animation;
@@ -15,9 +17,10 @@ class _ProfileSkeletonScreenState extends State<ProfileSkeletonScreen>
   @override
   void initState() {
     super.initState();
-    _controller =
-        AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
-          ..repeat();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat();
     _animation = Tween<double>(begin: -2, end: 2).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
     );
@@ -29,8 +32,7 @@ class _ProfileSkeletonScreenState extends State<ProfileSkeletonScreen>
     super.dispose();
   }
 
-  // ---------- shimmer wrapper ----------
-  Widget shimmer({required Widget child}) {
+  Widget _shimmer({required Widget child}) {
     return AnimatedBuilder(
       animation: _animation,
       builder: (_, __) {
@@ -46,8 +48,6 @@ class _ProfileSkeletonScreenState extends State<ProfileSkeletonScreen>
               ],
               stops: const [0, .5, 1],
             ).createShader(bounds);
-
-            
           },
           blendMode: BlendMode.srcATop,
           child: child,
@@ -58,159 +58,119 @@ class _ProfileSkeletonScreenState extends State<ProfileSkeletonScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xffF7F7F7),
-      body: shimmer(
-        child: SafeArea(
-          child: Column(
-            children: [
-
-              // ---------------- HEADER ----------------
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Color(0xffFAD7E2),
-                ),
-                child: Row(
-                  children: [
-                    _circle(28),
-                    const SizedBox(width: 14),
-                    _rect(width: 150, height: 22),
-                    const Spacer(),
-                    _pill(width: 90, height: 36),
-                    const SizedBox(width: 12),
-                    _circle(40),
-                  ],
+    return _shimmer(
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF6F9),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFFFC7D8), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFF5C8A).withOpacity(0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Avatar circle with pink border (matches the real profile image)
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFFF5C8A), width: 3),
+              ),
+              child: Container(
+                width: 76,
+                height: 76,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade200,
+                  shape: BoxShape.circle,
                 ),
               ),
-
-              const SizedBox(height: 18),
-
-              // ---------------- PROFILE CARD ----------------
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                padding: const EdgeInsets.all(18),
-                decoration: _card(),
-                child: Column(
-                  children: [
-
-                    Row(
-                      children: [
-                        _circle(86),
-                        const SizedBox(width: 16),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _rect(width: 120, height: 18),
-                            const SizedBox(height: 10),
-                            _rect(width: 160, height: 14),
-                            const SizedBox(height: 8),
-                            _rect(width: 110, height: 14),
-                          ],
-                        )
-                      ],
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    Row(
-                      children: [
-                        Expanded(child: _button()),
-                        const SizedBox(width: 12),
-                        Expanded(child: _button()),
-                      ],
-                    )
-                  ],
-                ),
+            ),
+            const SizedBox(width: 16),
+            // Right side – name, details, buttons
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Name placeholder
+                  _rect(width: 120, height: 18),
+                  const SizedBox(height: 8),
+                  // Gender • City placeholder
+                  _rect(width: 160, height: 14),
+                  const SizedBox(height: 6),
+                  // Rating placeholder
+                  _rect(width: 130, height: 14),
+                  const SizedBox(height: 14),
+                  // Two buttons row
+                  Row(
+                    children: [
+                      Expanded(child: _buttonOutline()),
+                      const SizedBox(width: 8),
+                      Expanded(child: _buttonFilled()),
+                    ],
+                  ),
+                ],
               ),
-
-              const SizedBox(height: 20),
-
-              // ---------------- MENU TILES ----------------
-              _menuTile(),
-              _menuTile(),
-              _menuTile(),
-              _menuTile(),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
-
-  // ---------- components ----------
 
   Widget _rect({required double width, required double height}) {
     return Container(
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey.shade200,
         borderRadius: BorderRadius.circular(6),
       ),
     );
   }
 
-  Widget _circle(double size) {
+  Widget _buttonOutline() {
     return Container(
-      width: size,
-      height: size,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-      ),
-    );
-  }
-
-  Widget _pill({required double width, required double height}) {
-    return Container(
-      width: width,
-      height: height,
+      height: 38,
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(40),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFF5C8A), width: 2),
       ),
     );
   }
 
-  Widget _button() {
+  Widget _buttonFilled() {
     return Container(
-      height: 46,
+      height: 38,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        color: const Color(0xFFFF5C8A),
+        borderRadius: BorderRadius.circular(8),
       ),
     );
   }
+}
 
-  Widget _menuTile() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(18),
-      decoration: _card(),
-      child: Row(
-        children: [
-          _circle(26),
-          const SizedBox(width: 16),
-          _rect(width: 160, height: 16),
-          const Spacer(),
-          _circle(18),
-        ],
+/// Legacy alias so existing imports keep working.
+/// Wraps [ProfileCardSkeleton] in a plain Scaffold.
+class ProfileSkeletonScreen extends StatelessWidget {
+  const ProfileSkeletonScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: const ProfileCardSkeleton(),
+        ),
       ),
-    );
-  }
-
-  BoxDecoration _card() {
-    return BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: [
-        BoxShadow(
-          blurRadius: 6,
-          color: Colors.black.withOpacity(.05),
-          offset: const Offset(0, 2),
-        )
-      ],
     );
   }
 }

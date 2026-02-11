@@ -137,7 +137,26 @@ class _ProfilePageState extends State<ProfilePage> {
       future: _loadListenerFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const ProfileSkeletonScreen();
+          return Scaffold(
+            backgroundColor: Colors.white,
+            appBar: AppBar(
+              backgroundColor: const Color(0xFFFFE4EC),
+              elevation: 0,
+              title: const Text(
+                "My Profile",
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              centerTitle: false,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              child: const ProfileCardSkeleton(),
+            ),
+          );
         }
 
         if (_listener == null) {
@@ -248,15 +267,15 @@ class _ProfilePageState extends State<ProfilePage> {
                 // Profile Header
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: const Color(0xFFFFF6F9),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: const Color(0xFFFFE4EC),
+                      color: const Color(0xFFFFC7D8),
                       width: 2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.grey.withOpacity(0.1),
+                        color: const Color(0xFFFF5C8A).withOpacity(0.12),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -270,12 +289,12 @@ class _ProfilePageState extends State<ProfilePage> {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: Colors.pinkAccent,
+                            color: const Color(0xFFFF5C8A),
                             width: 3,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.pinkAccent.withOpacity(0.3),
+                              color: const Color(0xFFFF5C8A).withOpacity(0.3),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),
@@ -421,7 +440,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                         color: Colors.white,
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: Colors.pinkAccent,
+                                          color: const Color(0xFFFF5C8A),
                                           width: 2,
                                         ),
                                       ),
@@ -432,14 +451,14 @@ class _ProfilePageState extends State<ProfilePage> {
                                         children: [
                                           Icon(
                                             Icons.edit,
-                                            color: Colors.pinkAccent,
+                                            color: const Color(0xFFFF5C8A),
                                             size: isMobile ? 14 : 16,
                                           ),
                                           SizedBox(width: isMobile ? 2 : 4),
                                           Text(
                                             "Edit Profile",
                                             style: TextStyle(
-                                              color: Colors.pinkAccent,
+                                              color: const Color(0xFFFF5C8A),
                                               fontWeight: FontWeight.w500,
                                               fontSize: isMobile ? 11 : 13,
                                             ),
@@ -468,7 +487,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                         vertical: 10,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: Colors.pinkAccent,
+                                        color: const Color(0xFFFF5C8A),
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Row(

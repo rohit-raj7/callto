@@ -393,9 +393,28 @@ class Listener {
         u.city,
         u.country,
         u.is_active as user_active,
-        u.created_at as user_created_at
+        u.created_at as user_created_at,
+        COALESCE(r_agg.computed_avg_rating, 0) as computed_avg_rating,
+        COALESCE(r_agg.computed_total_ratings, 0) as computed_total_ratings,
+        COALESCE(c_agg.total_call_minutes, 0) as total_call_minutes,
+        COALESCE(c_agg.total_calls, 0) as total_calls
       FROM listeners l
       JOIN users u ON l.user_id = u.user_id
+      LEFT JOIN (
+        SELECT listener_id,
+               ROUND(AVG(rating)::numeric, 2) as computed_avg_rating,
+               COUNT(*) as computed_total_ratings
+        FROM ratings
+        GROUP BY listener_id
+      ) r_agg ON r_agg.listener_id = l.listener_id
+      LEFT JOIN (
+        SELECT listener_id,
+               ROUND((COALESCE(SUM(duration_seconds), 0) / 60.0)::numeric, 1) as total_call_minutes,
+               COUNT(*) as total_calls
+        FROM calls
+        WHERE status = 'completed'
+        GROUP BY listener_id
+      ) c_agg ON c_agg.listener_id = l.listener_id
     `;
     const result = await pool.query(query);
 
@@ -428,7 +447,11 @@ class Listener {
         city: row.city,
         country: row.country,
         user_active: row.user_active,
-        user_created_at: row.user_created_at
+        user_created_at: row.user_created_at,
+        computed_avg_rating: parseFloat(row.computed_avg_rating) || 0,
+        computed_total_ratings: parseInt(row.computed_total_ratings) || 0,
+        total_call_minutes: parseFloat(row.total_call_minutes) || 0,
+        total_calls: parseInt(row.total_calls) || 0
       };
     });
 

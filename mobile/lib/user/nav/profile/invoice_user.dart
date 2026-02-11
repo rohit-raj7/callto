@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -45,30 +46,40 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
     return fallback;
   }
 
+  /// IST offset: +5 hours 30 minutes
+  static const Duration _istOffset = Duration(hours: 5, minutes: 30);
+
+  DateTime _toIST(DateTime utcDate) {
+    return utcDate.toUtc().add(_istOffset);
+  }
+
   DateTime _extractDate() {
     final raw =
         widget.transaction['created_at'] ??
         widget.transaction['createdAt'] ??
         widget.transaction['date'] ??
         widget.transaction['timestamp'];
+    if (raw == null) return DateTime.utc(1970);
     if (raw is int) {
       final millis = raw < 1000000000000 ? raw * 1000 : raw;
-      return DateTime.fromMillisecondsSinceEpoch(millis);
+      return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
     }
     if (raw is double) {
       final value = raw.toInt();
       final millis = value < 1000000000000 ? value * 1000 : value;
-      return DateTime.fromMillisecondsSinceEpoch(millis);
+      return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
     }
     if (raw is String) {
       final numeric = int.tryParse(raw);
       if (numeric != null) {
         final millis = numeric < 1000000000000 ? numeric * 1000 : numeric;
-        return DateTime.fromMillisecondsSinceEpoch(millis);
+        return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
       }
-      return DateTime.tryParse(raw) ?? DateTime.now();
+      final parsed = DateTime.tryParse(raw);
+      if (parsed != null) return parsed.toUtc();
+      return DateTime.utc(1970);
     }
-    return DateTime.now();
+    return DateTime.utc(1970);
   }
 
   double _extractAmount() {
@@ -87,6 +98,27 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
 
   String _formatAmount(double value) => '\u20B9${value.toStringAsFixed(2)}';
   String _formatPdfAmount(double value) => 'Rs.${value.toStringAsFixed(2)}';
+
+  /// Extract the original recharge amount (before bonus) from description.
+  /// Description format: "Wallet recharge ₹5 + ₹0.05 extra bonus"
+  /// Returns null if no bonus pattern found (use full amount).
+  double? _extractOriginalAmount() {
+    final description = _pickString(
+      ['description', 'title', 'note'],
+      fallback: '',
+    );
+    // Match "Wallet recharge ₹<amount>" before the bonus part
+    final match = RegExp(r'[Ww]allet\s+recharge\s+₹([\d.]+)').firstMatch(description);
+    if (match != null) {
+      return double.tryParse(match.group(1)!);
+    }
+    return null;
+  }
+
+  /// Build a clean invoice title without bonus info
+  String _cleanInvoiceTitle(double originalAmount) {
+    return 'Wallet recharge ₹${originalAmount.toStringAsFixed(originalAmount == originalAmount.roundToDouble() ? 0 : 2)}';
+  }
 
   String _formatInWords(double value) {
     final rounded = value.round();
@@ -175,6 +207,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
     required double sgst,
     required double cgst,
     required double igst,
+    required String invoiceTitle,
   }) async {
     if (_isDownloading) return;
     setState(() => _isDownloading = true);
@@ -237,7 +270,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
             _pdfDetailRow('Name', widget.userName, textStyle, boldTextStyle),
             _pdfDetailRow(
               'Transaction Date & Time',
-              DateFormat('dd-MM-yyyy, HH:mm:ss').format(createdAt),
+              DateFormat('dd MMM yyyy, hh:mm a').format(createdAt),
               textStyle,
               boldTextStyle,
             ),
@@ -290,7 +323,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
                   boldTextStyle: boldTextStyle,
                 ),
                 _pdfTableRow(
-                  widget.transactionTitle,
+                  invoiceTitle,
                   _formatPdfAmount(taxableValue),
                   textStyle: textStyle,
                   boldTextStyle: boldTextStyle,
@@ -388,13 +421,25 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
       final file = File('${outputDir.path}/$fileName');
       await file.writeAsBytes(await pdf.save(), flush: true);
 
+      // Open the saved PDF file
+      final openResult = await OpenFilex.open(file.path);
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Invoice downloaded: ${file.path}'),
-          backgroundColor: Colors.green[700],
-        ),
-      );
+      if (openResult.type == ResultType.done) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice saved: $fileName'),
+            backgroundColor: Colors.green[700],
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invoice saved at: ${file.path}'),
+            backgroundColor: Colors.green[700],
+          ),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -412,7 +457,8 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
 
   @override
   Widget build(BuildContext context) {
-    final createdAt = _extractDate();
+    final createdAtUtc = _extractDate();
+    final createdAt = _toIST(createdAtUtc);
     final transactionId = _pickString([
       'transaction_id',
       'payment_gateway_id',
@@ -424,7 +470,12 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
       'method',
     ], fallback: 'ONLINE').toUpperCase();
     final absAmount = _extractAmount();
-    final taxableValue = absAmount / 1.18;
+    // For invoice, use only the original recharge amount (exclude bonus)
+    final originalAmount = widget.isCredit ? (_extractOriginalAmount() ?? absAmount) : absAmount;
+    final invoiceTitle = widget.isCredit && _extractOriginalAmount() != null
+        ? _cleanInvoiceTitle(originalAmount)
+        : widget.transactionTitle;
+    final taxableValue = originalAmount / 1.18;
     final sgst = taxableValue * 0.09;
     final cgst = taxableValue * 0.09;
     const igst = 0.0;
@@ -449,11 +500,12 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
                     transactionId: transactionId,
                     paymentMethod: paymentMethod,
                     createdAt: createdAt,
-                    amount: absAmount,
+                    amount: originalAmount,
                     taxableValue: taxableValue,
                     sgst: sgst,
                     cgst: cgst,
                     igst: igst,
+                    invoiceTitle: invoiceTitle,
                   ),
             icon: _isDownloading
                 ? const SizedBox(
@@ -520,7 +572,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Address: 18th Cross, Sector 3, Bengaluru Urban, Karnataka, 560102',
+                      'Address: Super Market, Ground Floor, Rajiv Nagar Road no. 21, Patna, Bihar - 800024, India',
                     ),
                     const SizedBox(height: 4),
                     const Text('GSTIN: 29AAECC4821K1ZA'),
@@ -538,7 +590,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
               _detailRow('Name', widget.userName),
               _detailRow(
                 'Transaction Date & Time',
-                DateFormat('dd-MM-yyyy, HH:mm:ss').format(createdAt),
+                DateFormat('dd MMM yyyy, hh:mm a').format(createdAt),
               ),
               _detailRow('Transaction ID #', transactionId),
               _detailRow('Mode of Payment', paymentMethod),
@@ -559,7 +611,7 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
                 children: [
                   _tableRow('Description', 'Amount', isHeader: true),
                   _tableRow(
-                    widget.transactionTitle,
+                    invoiceTitle,
                     _formatAmount(taxableValue),
                   ),
                   _tableRow(
@@ -572,12 +624,12 @@ class _InvoiceUserPageState extends State<InvoiceUserPage> {
                   _tableRow('IGST (0.0%)', _formatAmount(igst)),
                   _tableRow(
                     'Grand Total',
-                    _formatAmount(absAmount),
+                    _formatAmount(originalAmount),
                     bold: true,
                   ),
                   _tableRow(
                     'Total Amount (In words)',
-                    _formatInWords(absAmount),
+                    _formatInWords(originalAmount),
                   ),
                 ],
               ),

@@ -184,6 +184,12 @@ router.put('/:call_id/status', authenticate, async (req, res) => {
         billing: {
           minutes: billing.minutes,
           userCharge: billing.userCharge,
+          // FIX: Include listenerEarn and platformCommission so listener
+          // dashboard can show correct payout without frontend calculation.
+          // listenerEarn is computed using admin-set listener_payout_per_min
+          // from the DB — never from frontend values.
+          listenerEarn: billing.listenerEarn,
+          platformCommission: billing.userCharge - billing.listenerEarn,
           durationSeconds: resolvedDurationSeconds
         }
       });
@@ -265,6 +271,12 @@ router.post('/end', authenticate, async (req, res) => {
       billing: {
         minutes: billing.minutes,
         userCharge: billing.userCharge,
+        // FIX: Include listenerEarn and platformCommission so listener
+        // dashboard can show correct payout without frontend calculation.
+        // listenerEarn is computed using admin-set listener_payout_per_min
+        // from the DB — never from frontend values.
+        listenerEarn: billing.listenerEarn,
+        platformCommission: billing.userCharge - billing.listenerEarn,
         durationSeconds: resolvedDurationSeconds
       }
     });

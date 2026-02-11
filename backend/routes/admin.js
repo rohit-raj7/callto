@@ -576,4 +576,42 @@ router.put('/listeners/:listener_id/verification-status', authenticateAdmin, asy
   }
 });
 
+// Get user transactions (admin)
+router.get('/users/:user_id/transactions', authenticateAdmin, async (req, res) => {
+  try {
+    const { user_id } = req.params;
+
+    // Fetch user info
+    const userResult = await pool.query(
+      'SELECT user_id, display_name, email, mobile_number, city, country, account_type, is_active, created_at FROM users WHERE user_id = $1',
+      [user_id]
+    );
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Fetch wallet
+    const walletResult = await pool.query(
+      'SELECT balance, currency, updated_at FROM wallets WHERE user_id = $1',
+      [user_id]
+    );
+
+    // Fetch transactions
+    const txResult = await pool.query(
+      `SELECT transaction_id, transaction_type, amount, currency, description, payment_method, payment_gateway_id, status, related_call_id, created_at
+       FROM transactions WHERE user_id = $1 ORDER BY created_at DESC`,
+      [user_id]
+    );
+
+    res.json({
+      user: userResult.rows[0],
+      wallet: walletResult.rows[0] || { balance: '0.00', currency: 'INR' },
+      transactions: txResult.rows
+    });
+  } catch (error) {
+    console.error('Get user transactions error:', error);
+    res.status(500).json({ error: 'Failed to fetch user transactions' });
+  }
+});
+
 export default router;

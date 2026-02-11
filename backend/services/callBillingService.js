@@ -75,6 +75,7 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
     );
 
     if (listenerResult.rows.length === 0) {
+      console.error(`[BILLING] Listener not found for call ${callId}, listener_id=${call.listener_id}`);
       const error = new Error('Listener not found for billing');
       error.code = 'LISTENER_NOT_FOUND';
       throw error;
@@ -84,13 +85,17 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
     const userRate = Number(listener.user_rate_per_min || 0);
     const payoutRate = Number(listener.listener_payout_per_min || 0);
 
+    // Validation: listener_payout_per_min MUST come from DB (set by admin).
+    // If missing or invalid, billing cannot proceed — prevents incorrect payouts.
     if (!Number.isFinite(userRate) || userRate <= 0) {
+      console.error(`[BILLING] Invalid user_rate_per_min=${listener.user_rate_per_min} for listener ${call.listener_id}. Rate must be set by admin.`);
       const error = new Error('Invalid user rate for billing');
       error.code = 'INVALID_USER_RATE';
       throw error;
     }
 
     if (!Number.isFinite(payoutRate) || payoutRate <= 0) {
+      console.error(`[BILLING] Invalid listener_payout_per_min=${listener.listener_payout_per_min} for listener ${call.listener_id}. Payout rate must be set by admin via ListenerRateSettings.`);
       const error = new Error('Invalid payout rate for billing');
       error.code = 'INVALID_PAYOUT_RATE';
       throw error;
@@ -101,6 +106,9 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
       userRate,
       payoutRate
     );
+
+    // Log the billing calculation for audit trail
+    console.log(`[BILLING] call=${callId} | duration=${durationSeconds}s → ${minutes}min | userRate=₹${userRate}/min → charge=₹${userCharge} | payoutRate=₹${payoutRate}/min → listenerEarn=₹${listenerEarn} | commission=₹${(userCharge - listenerEarn).toFixed(2)}`);
 
     await fetchOrCreateWallet(client, call.caller_id);
 

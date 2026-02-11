@@ -101,14 +101,22 @@ class Call {
   }
 
   // Get listener's call history
+  // FIX: JOIN call_records to get backend-calculated listener_earn instead of
+  // total_cost (user charge). The listener must see their actual payout, not
+  // the amount the user was charged. listener_earn is computed by
+  // callBillingService using the admin-set listener_payout_per_min rate.
   static async getListenerCallHistory(listener_id, limit = 20, offset = 0) {
     const query = `
-      SELECT c.*, 
+      SELECT c.*,
              u.display_name as caller_name,
              u.avatar_url as caller_avatar,
-             u.city
+             u.city,
+             cr.listener_earn,
+             cr.user_charge as cr_user_charge,
+             cr.minutes as billed_minutes_cr
       FROM calls c
       JOIN users u ON c.caller_id = u.user_id
+      LEFT JOIN call_records cr ON c.call_id = cr.call_id
       WHERE c.listener_id = $1
       ORDER BY c.created_at DESC
       LIMIT $2 OFFSET $3

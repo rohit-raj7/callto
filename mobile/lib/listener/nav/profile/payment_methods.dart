@@ -6,12 +6,11 @@ import '../../../models/call_model.dart';
 /// EARNINGS CALCULATION CONSTANTS
 /// ============================================
 /// 
-/// Platform Fee Structure:
-/// - Platform commission: 30% of gross earnings
-/// - Net earnings: 70% of gross earnings (listener's share)
+/// Platform commission is NOT calculated on frontend.
+/// The backend stores the actual listener payout (listener_earn) per call,
+/// computed from the admin-set listener_payout_per_min rate.
+/// Platform commission = userCharge - listenerEarn (derived from backend data).
 /// ============================================
-const double kPlatformCommissionPercent = 30.0;
-const double kListenerSharePercent = 70.0;
 
 /// ============================================
 /// DATA MODELS FOR EARNINGS
@@ -124,6 +123,8 @@ class MonthlyEarningsSummary {
 }
 
 /// Model to hold overall earnings breakdown
+/// FIX: grossEarnings = total user charge, listenerEarn = backend-calculated
+/// payout, platformFee = grossEarnings - listenerEarn. No hardcoded %.
 class EarningsBreakdown {
   final double grossEarnings;
   final double platformFee;
@@ -140,21 +141,23 @@ class EarningsBreakdown {
 /// EARNINGS CALCULATION SERVICE
 /// ============================================
 /// 
-/// Contains all earnings calculation logic separated from UI
+/// FIX: All earnings are now derived from backend-calculated listener_earn.
+/// The admin sets listener_payout_per_min in the DB; the backend computes
+/// listenerEarn = callDurationMinutes * listener_payout_per_min and stores
+/// it in call_records. The frontend simply reads this value — no
+/// hardcoded commission percentages.
 /// ============================================
 class EarningsCalculator {
-  /// Calculate earnings breakdown from gross earnings
-  /// 
-  /// Step 1: Platform fee = gross * commission%
-  /// Step 2: Net earnings = gross - platform fee
-  static EarningsBreakdown calculateBreakdown(double grossEarnings) {
-    final platformFee = grossEarnings * (kPlatformCommissionPercent / 100);
-    final netEarnings = grossEarnings * (kListenerSharePercent / 100);
-    
+  /// Calculate earnings breakdown from call data.
+  /// Uses backend-provided listenerEarn (actual payout) and grossEarnings
+  /// (user charge). Platform fee = gross - listenerEarn.
+  static EarningsBreakdown calculateBreakdownFromBackend(
+      double grossEarnings, double listenerEarn) {
+    final platformFee = grossEarnings - listenerEarn;
     return EarningsBreakdown(
       grossEarnings: grossEarnings,
-      platformFee: platformFee,
-      netEarnings: netEarnings,
+      platformFee: platformFee < 0 ? 0 : platformFee,
+      netEarnings: listenerEarn,
     );
   }
 
@@ -169,6 +172,10 @@ class EarningsCalculator {
       final callerId = call.callerId;
       final existing = userMap[callerId];
       
+      // FIX: Use call.listenerEarn (backend-calculated payout) instead of
+      // call.totalCost (user charge). Falls back to 0 if not yet available.
+      final earning = call.listenerEarn ?? 0;
+      
       if (existing != null) {
         userMap[callerId] = UserEarningsSummary(
           callerId: callerId,
@@ -176,7 +183,7 @@ class EarningsCalculator {
           callerAvatar: existing.callerAvatar ?? call.callerAvatar,
           totalCalls: existing.totalCalls + 1,
           totalDurationSeconds: existing.totalDurationSeconds + (call.durationSeconds ?? 0),
-          totalEarnings: existing.totalEarnings + (call.totalCost ?? 0),
+          totalEarnings: existing.totalEarnings + earning,
         );
       } else {
         userMap[callerId] = UserEarningsSummary(
@@ -185,7 +192,7 @@ class EarningsCalculator {
           callerAvatar: call.callerAvatar,
           totalCalls: 1,
           totalDurationSeconds: call.durationSeconds ?? 0,
-          totalEarnings: call.totalCost ?? 0,
+          totalEarnings: earning,
         );
       }
     }
@@ -225,14 +232,17 @@ class EarningsCalculator {
     weekMap.forEach((weekStart, weekCalls) {
       int totalDuration = 0;
       double grossEarnings = 0;
+      double listenerEarnings = 0;
 
       for (final call in weekCalls) {
         totalDuration += call.durationSeconds ?? 0;
         grossEarnings += call.totalCost ?? 0;
+        // FIX: Use backend-calculated listenerEarn for actual payout
+        listenerEarnings += call.listenerEarn ?? 0;
       }
 
-      // Calculate professional earnings breakdown
-      final breakdown = calculateBreakdown(grossEarnings);
+      // FIX: Use backend values, not hardcoded commission
+      final breakdown = calculateBreakdownFromBackend(grossEarnings, listenerEarnings);
       
       summaries.add(WeeklyEarningsSummary(
         weekStart: weekStart,
@@ -258,7 +268,19 @@ class EarningsCalculator {
     return DateTime(date.year, date.month, date.day - daysToSubtract);
   }
 
-  /// Calculate total gross earnings from calls
+  /// Calculate total listener earnings from calls (backend-provided values)
+  /// FIX: Use listenerEarn (actual payout) instead of totalCost (user charge).
+  static double calculateTotalListenerEarnings(List<Call> calls) {
+    double total = 0;
+    for (final call in calls) {
+      if (call.status == 'completed' && call.listenerEarn != null) {
+        total += call.listenerEarn!;
+      }
+    }
+    return total;
+  }
+
+  /// Calculate total gross (user charges) from calls
   static double calculateTotalGrossEarnings(List<Call> calls) {
     double total = 0;
     for (final call in calls) {
@@ -301,14 +323,17 @@ class EarningsCalculator {
       
       int totalDuration = 0;
       double grossEarnings = 0;
+      double listenerEarnings = 0;
 
       for (final call in monthCalls) {
         totalDuration += call.durationSeconds ?? 0;
         grossEarnings += call.totalCost ?? 0;
+        // FIX: Use backend-calculated listenerEarn for actual payout
+        listenerEarnings += call.listenerEarn ?? 0;
       }
 
-      // Calculate earnings breakdown
-      final breakdown = calculateBreakdown(grossEarnings);
+      // FIX: Use backend values, not hardcoded commission
+      final breakdown = calculateBreakdownFromBackend(grossEarnings, listenerEarnings);
       
       summaries.add(MonthlyEarningsSummary(
         year: year,
@@ -391,9 +416,12 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage>
         _weeklySummaries = EarningsCalculator.groupCallsByWeek(_allCalls);
         _monthlySummaries = EarningsCalculator.groupCallsByMonth(_allCalls);
         
-        // Calculate total earnings breakdown
+        // FIX: Use backend-calculated listener earnings, not hardcoded %
         final totalGross = EarningsCalculator.calculateTotalGrossEarnings(_allCalls);
-        _totalBreakdown = EarningsCalculator.calculateBreakdown(totalGross);
+        final totalListenerEarn = EarningsCalculator.calculateTotalListenerEarnings(_allCalls);
+        _totalBreakdown = EarningsCalculator.calculateBreakdownFromBackend(
+          totalGross, totalListenerEarn,
+        );
         
         setState(() {
           _isLoading = false;
@@ -709,8 +737,9 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage>
 
   /// Build user earnings card
   Widget _buildUserEarningsCard(UserEarningsSummary summary) {
-    // Calculate net earnings for this user
-    final breakdown = EarningsCalculator.calculateBreakdown(summary.totalEarnings);
+    // FIX: totalEarnings now already contains the backend-calculated
+    // listener payout, so netEarnings = totalEarnings directly.
+    final netEarnings = summary.totalEarnings;
     
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -792,7 +821,7 @@ class _PaymentMethodsPageState extends State<PaymentMethodsPage>
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '₹${breakdown.netEarnings.toStringAsFixed(2)}',
+                  '₹${netEarnings.toStringAsFixed(2)}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,

@@ -159,12 +159,13 @@ class UserService {
   }
 
   /// Add balance to wallet
-  Future<WalletResult> addBalance(double amount, {String? paymentId}) async {
+  Future<WalletResult> addBalance(double amount, {String? paymentId, String? packId}) async {
     final response = await _api.post(
       '${ApiConfig.userWallet}/add',
       body: {
         'amount': amount,
         if (paymentId != null) 'payment_id': paymentId,
+        if (packId != null) 'pack_id': packId,
         'payment_method': 'razorpay',
       },
     );
@@ -173,6 +174,8 @@ class UserService {
       return WalletResult(
         success: true,
         balance: _safeParseDouble(response.data['balance']),
+        bonusAmount: _safeParseDouble(response.data['bonus_amount']),
+        totalCredited: _safeParseDouble(response.data['total_credited']),
         message: response.data['message'],
       );
     } else {
@@ -203,6 +206,8 @@ class UserResult {
 class WalletResult {
   final bool success;
   final double balance;
+  final double bonusAmount;
+  final double totalCredited;
   final List<dynamic> transactions;
   final String? message;
   final String? error;
@@ -210,6 +215,8 @@ class WalletResult {
   WalletResult({
     required this.success,
     this.balance = 0,
+    this.bonusAmount = 0,
+    this.totalCredited = 0,
     this.transactions = const [],
     this.message,
     this.error,

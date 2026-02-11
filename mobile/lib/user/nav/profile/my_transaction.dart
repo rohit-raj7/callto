@@ -161,6 +161,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return null;
   }
 
+  /// IST offset: +5 hours 30 minutes
+  static const Duration _istOffset = Duration(hours: 5, minutes: 30);
+
+  /// Convert a UTC DateTime to IST (Asia/Kolkata, UTC+5:30)
+  DateTime _toIST(DateTime utcDate) {
+    return utcDate.toUtc().add(_istOffset);
+  }
+
   DateTime _extractDate(Map<String, dynamic> txn) {
     final rawDate =
         txn['created_at'] ??
@@ -168,26 +176,32 @@ class _TransactionScreenState extends State<TransactionScreen> {
         txn['date'] ??
         txn['timestamp'];
 
+    if (rawDate == null) return DateTime.utc(1970);
+
     if (rawDate is int) {
       final millis = rawDate < 1000000000000 ? rawDate * 1000 : rawDate;
-      return DateTime.fromMillisecondsSinceEpoch(millis);
+      return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
     }
     if (rawDate is double) {
       final value = rawDate.toInt();
       final millis = value < 1000000000000 ? value * 1000 : value;
-      return DateTime.fromMillisecondsSinceEpoch(millis);
+      return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
     }
     if (rawDate is String) {
       final numeric = int.tryParse(rawDate);
       if (numeric != null) {
         final millis = numeric < 1000000000000 ? numeric * 1000 : numeric;
-        return DateTime.fromMillisecondsSinceEpoch(millis);
+        return DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true);
       }
-      return DateTime.tryParse(rawDate) ??
-          DateTime.fromMillisecondsSinceEpoch(0);
+      // ISO 8601 strings — DateTime.parse handles 'Z' and offset notation
+      final parsed = DateTime.tryParse(rawDate);
+      if (parsed != null) {
+        return parsed.toUtc();
+      }
+      return DateTime.utc(1970);
     }
 
-    return DateTime.fromMillisecondsSinceEpoch(0);
+    return DateTime.utc(1970);
   }
 
   double _extractAmount(Map<String, dynamic> txn) {
@@ -258,6 +272,12 @@ class _TransactionScreenState extends State<TransactionScreen> {
   String _buildTitle(Map<String, dynamic> txn, bool isCredit, double amount) {
     final description = _pickString(txn, ['description', 'title', 'note']);
     if (description.isNotEmpty) {
+      // Clean up bonus info from title — it's shown separately
+      final bonusPattern = RegExp(r'\s*\+\s*₹[\d.]+\s*extra\s*bonus', caseSensitive: false);
+      final cleaned = description.replaceAll(bonusPattern, '').trim();
+      if (cleaned.isNotEmpty) {
+        return cleaned[0].toUpperCase() + cleaned.substring(1);
+      }
       return description[0].toUpperCase() + description.substring(1);
     }
 
@@ -272,14 +292,23 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return 'Wallet debit';
   }
 
-  String _buildMetaText(DateTime date, String transactionId) {
-    if (date.millisecondsSinceEpoch == 0) {
+  String? _extractBonusText(Map<String, dynamic> txn) {
+    final description = _pickString(txn, ['description', 'title', 'note']);
+    final match = RegExp(r'₹([\d.]+)\s*extra\s*bonus', caseSensitive: false).firstMatch(description);
+    if (match != null) {
+      return '+₹${match.group(1)} extra bonus included';
+    }
+    return null;
+  }
+
+  String _buildMetaText(DateTime utcDate, String transactionId) {
+    if (utcDate.millisecondsSinceEpoch == 0 || utcDate.year == 1970) {
       return 'Txn ID: $transactionId';
     }
 
-    final time = DateFormat('h:mm a').format(date).toLowerCase();
-    final day = DateFormat('dd/MM/yy').format(date);
-    return '$time | $day | Txn ID: $transactionId';
+    final ist = _toIST(utcDate);
+    final formatted = DateFormat('dd MMM yyyy, hh:mm a').format(ist);
+    return '$formatted | Txn ID: $transactionId';
   }
 
   Future<void> _copyTransactionId(String txnId) async {
@@ -469,12 +498,14 @@ class _TransactionScreenState extends State<TransactionScreen> {
           final isCredit = _isCredit(txn, rawAmount);
           final amount = rawAmount.abs();
           final title = _buildTitle(txn, isCredit, amount);
+          final bonusText = isCredit ? _extractBonusText(txn) : null;
           final txnId = _transactionId(txn);
           final date = _extractDate(txn);
           final metaText = _buildMetaText(date, txnId);
 
           return _TransactionCard(
             title: title,
+            bonusText: bonusText,
             metaText: metaText,
             amountText: '${isCredit ? '+' : '-'}${_formatRupee(amount)}',
             amountColor: isCredit
@@ -492,6 +523,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
 
 class _TransactionCard extends StatelessWidget {
   final String title;
+  final String? bonusText;
   final String metaText;
   final String amountText;
   final Color amountColor;
@@ -501,6 +533,7 @@ class _TransactionCard extends StatelessWidget {
 
   const _TransactionCard({
     required this.title,
+    this.bonusText,
     required this.metaText,
     required this.amountText,
     required this.amountColor,
@@ -536,13 +569,30 @@ class _TransactionCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: Text(
-                        title,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF3A63B8),
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF3A63B8),
+                            ),
+                          ),
+                          if (bonusText != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(
+                                bonusText!,
+                                style: const TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF1FA647),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                     const SizedBox(width: 10),

@@ -99,4 +99,7 @@ export const createRechargePack = (payload) => api.post('/recharge-packs', paylo
 export const updateRechargePack = (id, payload) => api.put(`/recharge-packs/${id}`, payload);
 export const deleteRechargePack = (id) => api.delete(`/recharge-packs/${id}`);
 
+// User Transactions (admin)
+export const getUserTransactions = (user_id) => api.get(`/admin/users/${user_id}/transactions`);
+
 export default api;

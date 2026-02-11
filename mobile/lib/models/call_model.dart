@@ -10,6 +10,10 @@ class Call {
   final int? durationSeconds;
   final double ratePerMinute;
   final double? totalCost;
+  // FIX: Added listenerEarn field — the actual payout amount calculated
+  // by backend using admin-set listener_payout_per_min rate. This must be
+  // used instead of totalCost for listener earnings display.
+  final double? listenerEarn;
   final DateTime? createdAt;
 
   // Joined data
@@ -31,6 +35,7 @@ class Call {
     this.durationSeconds,
     this.ratePerMinute = 0,
     this.totalCost,
+    this.listenerEarn,
     this.createdAt,
     this.callerName,
     this.callerAvatar,
@@ -76,6 +81,11 @@ class Call {
       totalCost: json['total_cost'] != null 
           ? parseDouble(json['total_cost']) 
           : null,
+      // FIX: Parse listener_earn from backend — this is the actual payout
+      // calculated as callDurationMinutes * listener_payout_per_min (from DB)
+      listenerEarn: json['listener_earn'] != null
+          ? parseDouble(json['listener_earn'])
+          : null,
       createdAt: json['created_at'] != null 
           ? DateTime.tryParse(json['created_at'].toString()) 
           : null,
@@ -100,6 +110,7 @@ class Call {
       'duration_seconds': durationSeconds,
       'rate_per_minute': ratePerMinute,
       'total_cost': totalCost,
+      'listener_earn': listenerEarn,
       'created_at': createdAt?.toIso8601String(),
       'listener_user_id': listenerUserId,
       'listener_online': listenerOnline,

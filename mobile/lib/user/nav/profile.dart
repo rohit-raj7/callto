@@ -200,10 +200,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const ProfileSkeletonScreen();
-    }
-
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -299,7 +295,14 @@ class _ProfilePageState extends State<ProfilePage> {
             : [],
       ),
 
-      body: _isEditMode ? _buildEditMode() : _buildViewMode(),
+      body: _isLoading
+          ? SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              child: const ProfileCardSkeleton(),
+            )
+          : _isEditMode
+              ? _buildEditMode()
+              : _buildViewMode(),
     );
   }
 
@@ -311,12 +314,12 @@ class _ProfilePageState extends State<ProfilePage> {
           // --- Profile Header ---
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: const Color(0xFFFFF6F9),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFFFE4EC), width: 2),
+              border: Border.all(color: const Color(0xFFFFC7D8), width: 2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.grey.withOpacity(0.1),
+                  color: const Color(0xFFFF5C8A).withOpacity(0.12),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -330,10 +333,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.pinkAccent, width: 3),
+                    border: Border.all(color: const Color(0xFFFF5C8A), width: 3),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.pinkAccent.withOpacity(0.3),
+                        color: const Color(0xFFFF5C8A).withOpacity(0.3),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -427,7 +430,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                   color: Colors.white,
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
-                                    color: Colors.pinkAccent,
+                                    color: const Color(0xFFFF5C8A),
                                     width: 2,
                                   ),
                                 ),
@@ -439,14 +442,14 @@ class _ProfilePageState extends State<ProfilePage> {
                                     children: [
                                       const Icon(
                                         Icons.edit,
-                                        color: Colors.pinkAccent,
+                                        color: Color(0xFFFF5C8A),
                                         size: 14,
                                       ),
                                       const SizedBox(width: 4),
                                       Text(
                                         "Edit",
                                         style: TextStyle(
-                                          color: Colors.pinkAccent,
+                                          color: Color(0xFFFF5C8A),
                                           fontWeight: FontWeight.w500,
                                           fontSize: 10,
                                         ),
@@ -480,7 +483,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                   vertical: 8,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.pinkAccent,
+                                  color: const Color(0xFFFF5C8A),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: FittedBox(
