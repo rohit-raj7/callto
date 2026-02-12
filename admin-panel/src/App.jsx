@@ -16,6 +16,7 @@ import ListenerDetails from './pages/ListenerDetails';
 import ListenerProfile from './pages/ListenerProfile';
 import ListenerRateSettings from './pages/ListenerRateSettings';
 import CallRateConfig from './pages/CallRateConfig';
+import ChatChargeConfig from './pages/ChatChargeConfig';
 import SendNotification from './pages/SendNotification';
 import RechargePacks from './pages/RechargePacks';
 import PrivateRoute from './components/PrivateRoute';
@@ -96,6 +97,15 @@ function App() {
                   <PrivateRoute>
                     <Layout>
                       <CallRateConfig />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/chat-charge-config" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <ChatChargeConfig />
                     </Layout>
                   </PrivateRoute>
                 </ThemeProvider>

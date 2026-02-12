@@ -575,6 +575,36 @@ async function ensureSchema() {
     `);
     console.log('✓ Ensured rate_config table and default row');
 
+    // Chat Charge Config table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chat_charge_config (
+        config_id SERIAL PRIMARY KEY,
+        charging_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        free_message_limit INTEGER NOT NULL DEFAULT 5,
+        message_block_size INTEGER NOT NULL DEFAULT 2,
+        charge_per_message_block NUMERIC(10, 2) NOT NULL DEFAULT 1.00,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await pool.query(`
+      INSERT INTO chat_charge_config (charging_enabled, free_message_limit, message_block_size, charge_per_message_block)
+      SELECT FALSE, 5, 2, 1.00
+      WHERE NOT EXISTS (SELECT 1 FROM chat_charge_config)
+    `);
+    console.log('✓ Ensured chat_charge_config table and default row');
+
+    // Add global chat message counters to users table (for chat charging)
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS total_messages_sent INTEGER NOT NULL DEFAULT 0;
+    `);
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS free_messages_used INTEGER NOT NULL DEFAULT 0;
+    `);
+    await pool.query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS last_charge_applied_at TIMESTAMP;
+    `);
+    console.log('✓ Ensured users table has chat charging columns');
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS call_records (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

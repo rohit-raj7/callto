@@ -171,7 +171,12 @@ class ApiService {
 
   /// Handle HTTP response
   ApiResponse _handleResponse(http.Response response) {
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+    dynamic body;
+    try {
+      body = response.body.isNotEmpty ? jsonDecode(response.body) : {};
+    } catch (_) {
+      body = {'error': response.body};
+    }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return ApiResponse.success(body);
@@ -179,8 +184,12 @@ class ApiService {
 
     // Try to extract meaningful error message from API body
     String errorMsg = 'Request failed';
+    String? errorCode;
     try {
       if (body is Map) {
+        if (body.containsKey('code')) {
+          errorCode = body['code']?.toString();
+        }
         if (body.containsKey('error') && body['error'] != null) {
           errorMsg = body['error'].toString();
         } else if (body.containsKey('message') && body['message'] != null) {
@@ -197,14 +206,14 @@ class ApiService {
 
     if (response.statusCode == 401) {
       _storage.clearToken();
-      return ApiResponse.error(errorMsg.isNotEmpty ? errorMsg : 'Unauthorized', statusCode: 401);
+      return ApiResponse.error(errorMsg.isNotEmpty ? errorMsg : 'Unauthorized', statusCode: 401, errorCode: errorCode);
     }
 
     if (response.statusCode == 404) {
-      return ApiResponse.error(errorMsg.isNotEmpty ? errorMsg : 'Not found', statusCode: 404);
+      return ApiResponse.error(errorMsg.isNotEmpty ? errorMsg : 'Not found', statusCode: 404, errorCode: errorCode);
     }
 
-    return ApiResponse.error(errorMsg, statusCode: response.statusCode);
+    return ApiResponse.error(errorMsg, statusCode: response.statusCode, errorCode: errorCode);
   }
 
   /// Check API health
@@ -224,19 +233,21 @@ class ApiResponse {
   final dynamic data;
   final String? error;
   final int? statusCode;
+  final String? errorCode;
 
   ApiResponse._({
     required this.isSuccess,
     this.data,
     this.error,
     this.statusCode,
+    this.errorCode,
   });
 
   factory ApiResponse.success(dynamic data) {
     return ApiResponse._(isSuccess: true, data: data);
   }
 
-  factory ApiResponse.error(String error, {int? statusCode}) {
-    return ApiResponse._(isSuccess: false, error: error, statusCode: statusCode);
+  factory ApiResponse.error(String error, {int? statusCode, String? errorCode}) {
+    return ApiResponse._(isSuccess: false, error: error, statusCode: statusCode, errorCode: errorCode);
   }
 }

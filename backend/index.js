@@ -33,6 +33,7 @@ import rechargePackRoutes from './routes/rechargePacks.js';
 import User from './models/User.js';
 import Listener from './models/Listener.js'; // Import for verification checks
 import { Chat, Message } from './models/Chat.js';
+import ChatChargeConfig from './models/ChatChargeConfig.js';
 import { sendPushFCM } from './utils/fcm.js';
 import NotificationOutbox from './models/NotificationOutbox.js';
 import NotificationDelivery from './models/NotificationDelivery.js';
@@ -575,6 +576,29 @@ io.on('connection', (socket) => {
       }
 
       const otherUserId = chat.user1_id === socket.userId ? chat.user2_id : chat.user1_id;
+
+      // CHAT CHARGING: Check if user should be charged for this message
+      // Uses GLOBAL per-user counters (not per-chat) — survives chat clear/delete
+      try {
+        const chargeResult = await ChatChargeConfig.checkAndCharge(socket.userId);
+        if (!chargeResult.allowed) {
+          console.log(`[SOCKET] Message blocked for user ${socket.userId}: ${chargeResult.reason}`);
+          socket.emit('chat:error', {
+            status: 'failed',
+            message: chargeResult.message || 'Insufficient balance. Please recharge.',
+            code: chargeResult.reason || 'LOW_BALANCE',
+            remainingFreeMessages: chargeResult.remainingFreeMessages ?? 0,
+            totalMessagesSent: chargeResult.totalMessagesSent ?? 0
+          });
+          return;
+        }
+        if (chargeResult.charged) {
+          console.log(`[SOCKET] Charged user ${socket.userId} ₹${chargeResult.chargeAmount} for chat message`);
+        }
+      } catch (chargeError) {
+        console.error('[SOCKET] Chat charge check error:', chargeError);
+        // On charging system error, allow message through (fail-open)
+      }
 
       // Save message to database (Chat & Message already imported at module level)
       const message = await Message.create({

@@ -50,6 +50,7 @@ flutter:
     - assets/voice/sample.mp3
     - assets/voice/random.mp3
     - assets/voice/calling.mp3
+    - assets/voice/low_balance.mp3
     - assets/login/logo.png
     - assets/login/homelogo.png
     - assets/login/img1.jpg
@@ -101,3 +102,5 @@ flutter:
     - assets/images/male_profile/avatar14.jpg
     - assets/images/male_profile/avatar15.jpg
     - assets/images/male_profile/avatar16.jpg 
+    - assets/images/male_profile/avatar17.jpg 
+    - assets/images/male_profile/avatar18.jpg 

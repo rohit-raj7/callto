@@ -1,5 +1,6 @@
 import express from 'express';
 import { Chat, Message } from '../models/Chat.js';
+import ChatChargeConfig from '../models/ChatChargeConfig.js';
 import { authenticate } from '../middleware/auth.js';
 
 // Factory function that creates router with socket.io instance
@@ -159,6 +160,29 @@ router.post('/:chat_id/messages', authenticate, async (req, res) => {
       }
     }
 
+    // CHAT CHARGING: Check if user should be charged for this message
+    // Uses GLOBAL per-user counters (not per-chat) — survives chat clear/delete
+    let chargeResult = null;
+    try {
+      chargeResult = await ChatChargeConfig.checkAndCharge(req.userId);
+      if (!chargeResult.allowed) {
+        console.log(`[CHATS] Message blocked for user ${req.userId}: ${chargeResult.reason}`);
+        return res.status(402).json({
+          status: 'failed',
+          message: chargeResult.message || 'Insufficient balance. Please recharge.',
+          code: chargeResult.reason || 'LOW_BALANCE',
+          remainingFreeMessages: chargeResult.remainingFreeMessages ?? 0,
+          totalMessagesSent: chargeResult.totalMessagesSent ?? 0
+        });
+      }
+      if (chargeResult.charged) {
+        console.log(`[CHATS] Charged user ${req.userId} ₹${chargeResult.chargeAmount} for chat message`);
+      }
+    } catch (chargeError) {
+      console.error('[CHATS] Chat charge check error:', chargeError);
+      // On charging system error, allow message through (fail-open)
+    }
+
     const message = await Message.create({
       chat_id: req.params.chat_id,
       sender_id: req.userId,
@@ -193,7 +217,11 @@ router.post('/:chat_id/messages', authenticate, async (req, res) => {
 
     res.status(201).json({
       message: 'Message sent',
-      data: message
+      data: message,
+      remainingFreeMessages: chargeResult?.remainingFreeMessages ?? 0,
+      totalMessagesSent: chargeResult?.totalMessagesSent ?? 0,
+      charged: chargeResult?.charged ?? false,
+      chargeAmount: chargeResult?.chargeAmount ?? 0
     });
   } catch (error) {
     console.error('Send message error:', error);

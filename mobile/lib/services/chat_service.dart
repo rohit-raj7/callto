@@ -124,6 +124,7 @@ class ChatService {
       return MessageResult(
         success: false,
         error: response.error ?? 'Failed to send message',
+        errorCode: response.errorCode,
       );
     }
   }
@@ -177,8 +178,9 @@ class MessageResult {
   final bool success;
   final Message? message;
   final String? error;
+  final String? errorCode;
 
-  MessageResult({required this.success, this.message, this.error});
+  MessageResult({required this.success, this.message, this.error, this.errorCode});
 }
 
 /// Result class for list of messages

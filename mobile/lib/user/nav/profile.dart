@@ -54,6 +54,8 @@ class _ProfilePageState extends State<ProfilePage> {
     'assets/images/male_profile/avatar14.jpg',
     'assets/images/male_profile/avatar15.jpg',
     'assets/images/male_profile/avatar16.jpg',
+    'assets/images/male_profile/avatar17.jpg',
+    'assets/images/male_profile/avatar18.jpg',
   ];
 
   @override

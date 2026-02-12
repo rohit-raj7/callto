@@ -31,6 +31,8 @@ class _FemaleProfilePageState extends State<FemaleProfilePage> {
     'assets/images/male_profile/avatar14.jpg',
     'assets/images/male_profile/avatar15.jpg',
     'assets/images/male_profile/avatar16.jpg',
+    'assets/images/male_profile/avatar17.jpg',
+    'assets/images/male_profile/avatar18.jpg',
   ];
 
   Future<void> _submitProfile() async {

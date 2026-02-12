@@ -4,6 +4,7 @@ import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import Admin from '../models/Admin.js';
 import Listener from '../models/Listener.js';
+import ChatChargeConfig from '../models/ChatChargeConfig.js';
 import config from '../config/config.js';
 import { pool, getRateConfig } from '../db.js';
 import { authenticateAdmin } from '../middleware/auth.js';
@@ -611,6 +612,80 @@ router.get('/users/:user_id/transactions', authenticateAdmin, async (req, res) =
   } catch (error) {
     console.error('Get user transactions error:', error);
     res.status(500).json({ error: 'Failed to fetch user transactions' });
+  }
+});
+
+// ============================================
+// CHAT CHARGE CONFIG ROUTES
+// ============================================
+
+// GET /api/admin/chat-charge-config
+router.get('/chat-charge-config', authenticateAdmin, async (req, res) => {
+  try {
+    const config = await ChatChargeConfig.getActive();
+    res.json({
+      chatChargeConfig: {
+        chargingEnabled: config.charging_enabled === true,
+        freeMessageLimit: Number(config.free_message_limit),
+        messageBlockSize: Number(config.message_block_size),
+        chargePerMessageBlock: Number(config.charge_per_message_block),
+        updatedAt: config.updated_at
+      }
+    });
+  } catch (error) {
+    console.error('Get chat charge config error:', error);
+    res.status(500).json({ error: 'Failed to fetch chat charge config' });
+  }
+});
+
+// PUT /api/admin/chat-charge-config
+router.put('/chat-charge-config', authenticateAdmin, async (req, res) => {
+  try {
+    const {
+      chargingEnabled,
+      freeMessageLimit,
+      messageBlockSize,
+      chargePerMessageBlock
+    } = req.body || {};
+
+    const enabled = chargingEnabled === true;
+    const freeLimit = Number(freeMessageLimit);
+    const blockSize = Number(messageBlockSize);
+    const chargePerBlock = Number(chargePerMessageBlock);
+
+    if (!Number.isFinite(freeLimit) || freeLimit < 0) {
+      return res.status(400).json({ error: 'freeMessageLimit must be a non-negative number' });
+    }
+
+    if (enabled) {
+      if (!Number.isFinite(blockSize) || blockSize <= 0) {
+        return res.status(400).json({ error: 'messageBlockSize must be a positive number' });
+      }
+      if (!Number.isFinite(chargePerBlock) || chargePerBlock <= 0) {
+        return res.status(400).json({ error: 'chargePerMessageBlock must be a positive number' });
+      }
+    }
+
+    const updated = await ChatChargeConfig.update({
+      chargingEnabled: enabled,
+      freeMessageLimit: freeLimit,
+      messageBlockSize: enabled ? blockSize : (blockSize || 2),
+      chargePerMessageBlock: enabled ? chargePerBlock : (chargePerBlock || 1.00)
+    });
+
+    res.json({
+      message: 'Chat charge config updated',
+      chatChargeConfig: {
+        chargingEnabled: updated.charging_enabled === true,
+        freeMessageLimit: Number(updated.free_message_limit),
+        messageBlockSize: Number(updated.message_block_size),
+        chargePerMessageBlock: Number(updated.charge_per_message_block),
+        updatedAt: updated.updated_at
+      }
+    });
+  } catch (error) {
+    console.error('Update chat charge config error:', error);
+    res.status(500).json({ error: 'Failed to update chat charge config' });
   }
 });
 

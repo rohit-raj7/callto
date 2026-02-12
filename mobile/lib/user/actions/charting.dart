@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../services/socket_service.dart';
 import '../../services/chat_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/chat_state_manager.dart';
 import '../../models/chat_model.dart';
+import '../nav/profile/wallet.dart';
 
 class ChatPage extends StatefulWidget {
   final String expertName;
@@ -35,6 +37,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final ChatStateManager _chatStateManager = ChatStateManager();
 
   final List<Message> _messages = [];
+  final AudioPlayer _lowBalancePlayer = AudioPlayer();
   String? _chatId;
   String? _currentUserId;
   String? _otherUserId; // Track other user's ID for delete for everyone
@@ -44,6 +47,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final bool _otherUserOnline =
       true; // Assume online initially since they're a listener
   String? _errorMessage;
+  bool _showLowBalanceOverlay = false;
 
   // Track if we've received history from socket
   bool _historyReceived = false;
@@ -329,12 +333,29 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Listen for errors
     _errorSubscription = _socketService.onChatError.listen((data) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(data['error'] ?? 'An error occurred'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        final errorCode = data['code']?.toString();
+        final errorMessage = data['message']?.toString() ?? data['error']?.toString() ?? 'An error occurred';
+
+        if (errorCode == 'LOW_BALANCE') {
+          // Remove the last optimistic message (the one that was blocked)
+          setState(() {
+            final lastTempIndex = _messages.lastIndexWhere(
+              (m) => m.messageId.startsWith('temp_'),
+            );
+            if (lastTempIndex != -1) {
+              _messages.removeAt(lastTempIndex);
+            }
+            _showLowBalanceOverlay = true;
+          });
+          _playLowBalanceSound();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     });
 
@@ -375,6 +396,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _errorSubscription?.cancel();
     _deleteSubscription?.cancel();
 
+    _lowBalancePlayer.dispose();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -436,20 +458,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             _messages.removeWhere((m) => m.messageId == tempId);
           });
           if (mounted) {
-            // VERIFICATION: Show user-friendly error for verification failures
-            final error = result.error ?? 'Failed to send message';
-            final userFriendlyError =
-                error.toLowerCase().contains('not approved')
-                ? 'This listener is not available for chat at the moment'
-                : error;
+            // Check for LOW_BALANCE error
+            if (result.errorCode == 'LOW_BALANCE') {
+              setState(() {
+                _showLowBalanceOverlay = true;
+              });
+              _playLowBalanceSound();
+            } else {
+              // VERIFICATION: Show user-friendly error for verification failures
+              final error = result.error ?? 'Failed to send message';
+              final userFriendlyError =
+                  error.toLowerCase().contains('not approved')
+                  ? 'This listener is not available for chat at the moment'
+                  : error;
 
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(userFriendlyError),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 4),
-              ),
-            );
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(userFriendlyError),
+                  backgroundColor: Colors.red,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
           }
         }
       } catch (e) {
@@ -473,6 +503,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (_isTyping != typing && _chatId != null) {
       _isTyping = typing;
       _socketService.sendTypingIndicator(chatId: _chatId!, isTyping: typing);
+    }
+  }
+
+  /// Play low balance alert sound
+  void _playLowBalanceSound() {
+    try {
+      _lowBalancePlayer.stop();
+      _lowBalancePlayer.play(AssetSource('voice/low_balance.mp3'));
+    } catch (e) {
+      print('[ChatPage] Error playing low balance sound: $e');
     }
   }
 
@@ -859,7 +899,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: const Color(0xFFFFEBEE),
       appBar: _buildAppBar(),
-      body: Column(
+      body: Stack(
+        children: [
+          Column(
         children: [
           // Messages List (reversed for bottom-anchored scrolling)
           Expanded(
@@ -1101,6 +1143,163 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             ),
           ),
         ],
+      ), // end Column
+
+          // Low balance overlay (shown over chat when balance is insufficient)
+          if (_showLowBalanceOverlay) _buildLowBalanceOverlay(),
+        ],
+      ), // end Stack
+    );
+  }
+
+  /// Low balance overlay — displayed over the chat screen (matches design mockup).
+  Widget _buildLowBalanceOverlay() {
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: () {
+          // Dismiss overlay when tapping outside the card
+          setState(() {
+            _showLowBalanceOverlay = false;
+          });
+        },
+        child: Container(
+          color: Colors.black.withOpacity(0.35),
+          alignment: Alignment.center,
+          child: GestureDetector(
+            onTap: () {}, // Prevent dismiss when tapping the card itself
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 36),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Warning icon
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFFFF3E0),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: Color(0xFFFFA726),
+                      size: 30,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Title
+                  const Text(
+                    'Low balance to continue\nchat',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A1A),
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Subtitle
+                  const Text(
+                    'Insufficient balance. Please recharge\nto continue this conversation.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: Color(0xFF757575),
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Add Balance button (filled)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _showLowBalanceOverlay = false;
+                        });
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const WalletScreen(),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF78909C),
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                      ),
+                      child: const Text(
+                        'Add Balance',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // View Plans button (outlined)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: OutlinedButton(
+                      onPressed: () {
+                        setState(() {
+                          _showLowBalanceOverlay = false;
+                        });
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const WalletScreen(),
+                          ),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF5C6BC0),
+                        side: const BorderSide(
+                          color: Color(0xFF5C6BC0),
+                          width: 1.5,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                      ),
+                      child: const Text(
+                        'View Plans',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

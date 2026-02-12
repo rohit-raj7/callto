@@ -89,6 +89,11 @@ export const updateListenerRates = (listener_id, payload) =>
   api.put(`/admin/listener/update-rates/${listener_id}`, payload);
 export const getRateConfig = () => api.get('/admin/rate-config');
 export const updateRateConfig = (payload) => api.put('/admin/rate-config', payload);
+
+// Chat Charge Config methods
+export const getChatChargeConfig = () => api.get('/admin/chat-charge-config');
+export const updateChatChargeConfig = (payload) => api.put('/admin/chat-charge-config', payload);
+
 export const getOutbox = (params = {}) => api.get('/notifications/outbox', { params });
 export const updateOutbox = (id, payload) => api.put(`/notifications/outbox/${id}`, payload);
 export const deleteOutbox = (id) => api.delete(`/notifications/outbox/${id}`);
