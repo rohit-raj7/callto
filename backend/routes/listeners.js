@@ -209,13 +209,14 @@ router.post('/', authenticate, async (req, res) => {
       });
     } else {
       // Create new listener profile
+      // Rates are admin-controlled: ignore any rate from client, use server defaults (₹4 user rate, ₹1 payout)
       listener = await Listener.create({
         user_id: req.userId,
         professional_name,
         age: age ? parseInt(age) : undefined,
         specialties: Array.isArray(specialties) ? specialties : [specialties],
         languages: Array.isArray(languages) ? languages : [languages],
-        rate_per_minute: rateValue || 0,
+        rate_per_minute: 0,
         experience_years: experience_years ? parseInt(experience_years) : undefined,
         education,
         certifications: Array.isArray(certifications) ? certifications : [],

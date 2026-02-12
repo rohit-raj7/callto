@@ -398,7 +398,7 @@ class StorageService {
   /// Get listener rate per minute
   Future<double> getListenerRatePerMinute() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getDouble(_listenerRatePerMinuteKey) ?? 1.0;
+    return prefs.getDouble(_listenerRatePerMinuteKey) ?? 5.0;
   }
 
   /// Save listener voice verification status

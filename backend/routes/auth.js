@@ -119,7 +119,7 @@ router.post('/social-login', async (req, res) => {
     // ===================== CREATE USER =====================
     if (!user) {
       const rateConfig = await getRateConfig();
-      const isFirstTimeUser = provider === 'google';
+      const isFirstTimeUser = true; // All new users are first-time users
       user = await User.create({
         phone_number: null,
         email: userInfo.email || null,

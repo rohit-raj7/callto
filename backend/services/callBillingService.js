@@ -1,4 +1,4 @@
-import { pool } from '../db.js';
+import { pool, getRateConfig } from '../db.js';
 
 const roundMoney = (value) => Number(Number(value || 0).toFixed(2));
 
@@ -82,7 +82,7 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
     }
 
     const listener = listenerResult.rows[0];
-    const userRate = Number(listener.user_rate_per_min || 0);
+    let userRate = Number(listener.user_rate_per_min || 0);
     const payoutRate = Number(listener.listener_payout_per_min || 0);
 
     // Validation: listener_payout_per_min MUST come from DB (set by admin).
@@ -99,6 +99,26 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
       const error = new Error('Invalid payout rate for billing');
       error.code = 'INVALID_PAYOUT_RATE';
       throw error;
+    }
+
+    // Check if caller is eligible for first-time offer
+    const callerResult = await client.query(
+      'SELECT is_first_time_user, offer_used FROM users WHERE user_id = $1',
+      [call.caller_id]
+    );
+    const caller = callerResult.rows[0];
+    let offerApplied = false;
+
+    if (caller && caller.is_first_time_user && !caller.offer_used) {
+      const rateConfig = await getRateConfig();
+      if (rateConfig.first_time_offer_enabled
+          && rateConfig.offer_minutes_limit > 0
+          && Number(rateConfig.offer_flat_price) > 0) {
+        const offerRate = Number(rateConfig.offer_flat_price) / rateConfig.offer_minutes_limit;
+        console.log(`[BILLING] First-time offer applied for user ${call.caller_id}: ₹${offerRate}/min instead of ₹${userRate}/min`);
+        userRate = offerRate;
+        offerApplied = true;
+      }
     }
 
     const { minutes, userCharge, listenerEarn } = calculateCallCharge(
@@ -190,6 +210,16 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
         payoutRate
       ]
     );
+
+    // Mark offer as used INSIDE the transaction to prevent race conditions
+    // This ensures a user can only ever get the offer rate on one call
+    if (offerApplied) {
+      await client.query(
+        `UPDATE users SET offer_used = TRUE, updated_at = CURRENT_TIMESTAMP WHERE user_id = $1`,
+        [call.caller_id]
+      );
+      console.log(`[BILLING] Marked offer_used=true for user ${call.caller_id} (inside transaction)`);
+    }
 
     await client.query('COMMIT');
 

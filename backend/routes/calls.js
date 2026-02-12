@@ -9,6 +9,7 @@ import User from '../models/User.js';
 import { authenticate } from '../middleware/auth.js';
 import config from '../config/config.js';
 import { finalizeCallBilling } from '../services/callBillingService.js';
+import { getRateConfig } from '../db.js';
 
 const resolveDurationSeconds = (call, durationSeconds) => {
   const endedAt = new Date();
@@ -81,21 +82,33 @@ router.post('/', authenticate, async (req, res) => {
       return res.status(500).json({ error: 'Experts rate is invalid' });
     }
 
+    // Check if user is eligible for first-time offer
+    const caller = await User.findById(req.userId);
+    const rateConfig = await getRateConfig();
+    const isOfferEligible = caller && caller.is_first_time_user && !caller.offer_used
+      && rateConfig.first_time_offer_enabled
+      && rateConfig.offer_minutes_limit > 0
+      && Number(rateConfig.offer_flat_price) > 0;
+
+    const effectiveRate = isOfferEligible
+      ? Number(rateConfig.offer_flat_price) / rateConfig.offer_minutes_limit
+      : userRate;
+
     const wallet = await User.getWallet(req.userId);
     const availableBalance = parseFloat(wallet.balance || 0);
-    if (availableBalance < userRate) {
+    if (availableBalance < effectiveRate) {
       return res.status(402).json({
         error: 'Low balance',
-        details: `Minimum balance of ₹${userRate} is required to start a call`
+        details: `Minimum balance of ₹${effectiveRate.toFixed(2)} is required to start a call`
       });
     }
 
-    // Create call
+    // Create call — store the effective rate so billing uses it
     const call = await Call.create({
       caller_id: req.userId,
       listener_id,
       call_type: call_type || 'audio',
-      rate_per_minute: userRate
+      rate_per_minute: effectiveRate
     });
 
     res.status(201).json({
@@ -247,17 +260,7 @@ router.post('/end', authenticate, async (req, res) => {
 
     if (!billing.alreadyBilled) {
       await Listener.incrementCallStats(call.listener_id, billing.minutes);
-
-      // Mark offer as used after the user's first successful call
-      try {
-        const caller = await User.findById(call.caller_id);
-        if (caller && caller.is_first_time_user && !caller.offer_used) {
-          await User.markOfferUsed(call.caller_id);
-          console.log(`[CALL] Marked offer_used=true for user ${call.caller_id}`);
-        }
-      } catch (offerErr) {
-        console.error('[CALL] Failed to mark offer used:', offerErr.message);
-      }
+      // offer_used is now marked atomically inside callBillingService transaction
     }
 
     const updatedCall = await Call.findById(callId);
@@ -445,21 +448,33 @@ router.post('/random', authenticate, async (req, res) => {
       return res.status(500).json({ error: 'Listener rate is invalid' });
     }
 
+    // Check if user is eligible for first-time offer
+    const caller = await User.findById(req.userId);
+    const rateConfig = await getRateConfig();
+    const isOfferEligible = caller && caller.is_first_time_user && !caller.offer_used
+      && rateConfig.first_time_offer_enabled
+      && rateConfig.offer_minutes_limit > 0
+      && Number(rateConfig.offer_flat_price) > 0;
+
+    const effectiveRate = isOfferEligible
+      ? Number(rateConfig.offer_flat_price) / rateConfig.offer_minutes_limit
+      : userRate;
+
     const wallet = await User.getWallet(req.userId);
     const availableBalance = parseFloat(wallet.balance || 0);
-    if (availableBalance < userRate) {
+    if (availableBalance < effectiveRate) {
       return res.status(402).json({
         error: 'Insufficient balance',
-        details: `Minimum balance of ₹${userRate} is required to start a call`
+        details: `Minimum balance of ₹${effectiveRate.toFixed(2)} is required to start a call`
       });
     }
 
-    // Create call with random listener
+    // Create call with random listener — store effective rate
     const call = await Call.create({
       caller_id: req.userId,
       listener_id: listener.listener_id,
       call_type: call_type || 'audio',
-      rate_per_minute: userRate
+      rate_per_minute: effectiveRate
     });
 
     res.status(201).json({
