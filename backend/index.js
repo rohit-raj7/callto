@@ -563,6 +563,19 @@ io.on('connection', (socket) => {
     }
 
     try {
+      const chat = await Chat.findById(chatId);
+      if (!chat) {
+        socket.emit('chat:error', { error: 'Chat not found' });
+        return;
+      }
+
+      if (chat.user1_id !== socket.userId && chat.user2_id !== socket.userId) {
+        socket.emit('chat:error', { error: 'Forbidden' });
+        return;
+      }
+
+      const otherUserId = chat.user1_id === socket.userId ? chat.user2_id : chat.user1_id;
+
       // Save message to database (Chat & Message already imported at module level)
       const message = await Message.create({
         chat_id: chatId,
@@ -611,9 +624,8 @@ io.on('connection', (socket) => {
       io.to(`chat_${chatId}`).emit('chat:message', messageData);
 
       // Send notification to offline/non-viewing users asynchronously (don't block)
-      Chat.findById(chatId).then(chat => {
-        if (chat) {
-          const otherUserId = chat.user1_id === socket.userId ? chat.user2_id : chat.user1_id;
+      Promise.resolve(chat).then(chatData => {
+        if (chatData) {
           const otherUserState = userChatState.get(otherUserId);
           
           const isOtherUserViewingThisChat = otherUserState && 

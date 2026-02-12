@@ -17,7 +17,7 @@ class ChatService {
     if (response.isSuccess) {
       final List<dynamic> chatsJson = response.data['chats'] ?? [];
       final chats = chatsJson.map((json) => Chat.fromJson(json)).toList();
-      
+
       return ChatListResult(
         success: true,
         chats: chats,
@@ -40,7 +40,7 @@ class ChatService {
 
     if (response.isSuccess) {
       final chat = Chat.fromJson(response.data['chat']);
-      
+
       return ChatResult(
         success: true,
         chat: chat,
@@ -60,11 +60,8 @@ class ChatService {
 
     if (response.isSuccess) {
       final chat = Chat.fromJson(response.data['chat']);
-      
-      return ChatResult(
-        success: true,
-        chat: chat,
-      );
+
+      return ChatResult(success: true, chat: chat);
     } else {
       return ChatResult(
         success: false,
@@ -81,16 +78,15 @@ class ChatService {
   }) async {
     final response = await _api.get(
       '${ApiConfig.chats}/$chatId/messages',
-      queryParams: {
-        'limit': limit.toString(),
-        'offset': offset.toString(),
-      },
+      queryParams: {'limit': limit.toString(), 'offset': offset.toString()},
     );
 
     if (response.isSuccess) {
       final List<dynamic> messagesJson = response.data['messages'] ?? [];
-      final messages = messagesJson.map((json) => Message.fromJson(json)).toList();
-      
+      final messages = messagesJson
+          .map((json) => Message.fromJson(json))
+          .toList();
+
       return MessageListResult(
         success: true,
         messages: messages,
@@ -122,11 +118,8 @@ class ChatService {
 
     if (response.isSuccess) {
       final message = Message.fromJson(response.data['data']);
-      
-      return MessageResult(
-        success: true,
-        message: message,
-      );
+
+      return MessageResult(success: true, message: message);
     } else {
       return MessageResult(
         success: false,
@@ -140,6 +133,18 @@ class ChatService {
     final response = await _api.put('${ApiConfig.chats}/$chatId/read');
     return response.isSuccess;
   }
+
+  /// Delete/deactivate a chat
+  Future<bool> deleteChat(String chatId) async {
+    final response = await _api.delete('${ApiConfig.chats}/$chatId');
+    return response.isSuccess;
+  }
+
+  /// Clear all messages from a chat while keeping the chat in the list
+  Future<bool> clearChat(String chatId) async {
+    final response = await _api.delete('${ApiConfig.chats}/$chatId/messages');
+    return response.isSuccess;
+  }
 }
 
 /// Result class for single chat
@@ -149,12 +154,7 @@ class ChatResult {
   final String? message;
   final String? error;
 
-  ChatResult({
-    required this.success,
-    this.chat,
-    this.message,
-    this.error,
-  });
+  ChatResult({required this.success, this.chat, this.message, this.error});
 }
 
 /// Result class for list of chats
@@ -178,11 +178,7 @@ class MessageResult {
   final Message? message;
   final String? error;
 
-  MessageResult({
-    required this.success,
-    this.message,
-    this.error,
-  });
+  MessageResult({required this.success, this.message, this.error});
 }
 
 /// Result class for list of messages

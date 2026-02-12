@@ -143,6 +143,7 @@ router.post('/:chat_id/messages', authenticate, async (req, res) => {
 
     // VERIFICATION CHECK: If other party is a listener, verify they are approved
     const otherUserId = chat.user1_id === req.userId ? chat.user2_id : chat.user1_id;
+
     const { default: Listener } = await import('../models/Listener.js');
     const otherUserListener = await Listener.findByUserId(otherUserId);
     
@@ -197,6 +198,36 @@ router.post('/:chat_id/messages', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Send message error:', error);
     res.status(500).json({ error: 'Failed to send message' });
+  }
+});
+
+// DELETE /api/chats/:chat_id/messages
+// Clear all messages in a chat
+router.delete('/:chat_id/messages', authenticate, async (req, res) => {
+  try {
+    const chat = await Chat.findById(req.params.chat_id);
+
+    if (!chat) {
+      return res.status(404).json({ error: 'Chat not found' });
+    }
+
+    if (chat.user1_id !== req.userId && chat.user2_id !== req.userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    await Chat.clearMessages(req.params.chat_id);
+
+    if (io) {
+      io.to(`chat_${req.params.chat_id}`).emit('chat:cleared', {
+        chatId: req.params.chat_id,
+        clearedBy: req.userId,
+      });
+    }
+
+    res.json({ message: 'Chat cleared successfully' });
+  } catch (error) {
+    console.error('Clear chat error:', error);
+    res.status(500).json({ error: 'Failed to clear chat' });
   }
 });
 

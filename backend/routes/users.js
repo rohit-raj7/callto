@@ -252,66 +252,6 @@ router.get('/favorites', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/users/block/:user_id
-// Block a user
-router.post('/block/:blocked_user_id', authenticate, async (req, res) => {
-  try {
-    const { reason } = req.body;
-
-    const query = `
-      INSERT INTO blocked_users (blocker_id, blocked_id, reason)
-      VALUES ($1, $2, $3)
-      ON CONFLICT (blocker_id, blocked_id) DO NOTHING
-      RETURNING *
-    `;
-    const result = await pool.query(query, [req.userId, req.params.blocked_user_id, reason]);
-
-    res.json({
-      message: 'User blocked successfully',
-      block: result.rows[0]
-    });
-  } catch (error) {
-    console.error('Block user error:', error);
-    res.status(500).json({ error: 'Failed to block user' });
-  }
-});
-
-// DELETE /api/users/block/:user_id
-// Unblock a user
-router.delete('/block/:blocked_user_id', authenticate, async (req, res) => {
-  try {
-    await pool.query(
-      'DELETE FROM blocked_users WHERE blocker_id = $1 AND blocked_id = $2',
-      [req.userId, req.params.blocked_user_id]
-    );
-
-    res.json({ message: 'User unblocked successfully' });
-  } catch (error) {
-    console.error('Unblock user error:', error);
-    res.status(500).json({ error: 'Failed to unblock user' });
-  }
-});
-
-// GET /api/users/blocked
-// Get blocked users list
-router.get('/blocked', authenticate, async (req, res) => {
-  try {
-    const query = `
-      SELECT u.user_id, u.display_name, u.avatar_url, b.created_at as blocked_at, b.reason
-      FROM blocked_users b
-      JOIN users u ON b.blocked_id = u.user_id
-      WHERE b.blocker_id = $1
-      ORDER BY b.created_at DESC
-    `;
-    const result = await pool.query(query, [req.userId]);
-
-    res.json({ blocked_users: result.rows });
-  } catch (error) {
-    console.error('Get blocked users error:', error);
-    res.status(500).json({ error: 'Failed to fetch blocked users' });
-  }
-});
-
 // DELETE /api/users/account
 // Delete user account
 router.delete('/account', authenticate, async (req, res) => {

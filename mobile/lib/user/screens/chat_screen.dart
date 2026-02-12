@@ -32,6 +32,9 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _errorMessage;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  bool _isSelectionMode = false;
+  final Set<String> _selectedChatIds = <String>{};
+  final Set<String> _archivedChatIds = <String>{};
 
   // Real-time online status tracking
   Map<String, bool> _onlineStatus = {};
@@ -66,14 +69,18 @@ class _ChatScreenState extends State<ChatScreen> {
     });
 
     // Listen for notifications (when NOT in a chat room)
-    _notificationSubscription = _socketService.onChatNotification.listen((data) {
+    _notificationSubscription = _socketService.onChatNotification.listen((
+      data,
+    ) {
       if (mounted) {
         _updateChatFromMessage(data);
       }
     });
 
     // Track listener online/offline status in real-time
-    _statusSubscription = _socketService.listenerStatusStream.listen((statusMap) {
+    _statusSubscription = _socketService.listenerStatusStream.listen((
+      statusMap,
+    ) {
       if (mounted) {
         setState(() {
           _onlineStatus = statusMap;
@@ -133,7 +140,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _loadChats() async {
     if (!_isLoading) {
-      setState(() { _isLoading = true; _errorMessage = null; });
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
     }
 
     try {
@@ -145,6 +155,12 @@ class _ChatScreenState extends State<ChatScreen> {
 
         setState(() {
           _chats = result.chats;
+          final chatIds = _chats.map((chat) => chat.chatId).toSet();
+          _selectedChatIds.removeWhere((id) => !chatIds.contains(id));
+          _archivedChatIds.removeWhere((id) => !chatIds.contains(id));
+          if (_selectedChatIds.isEmpty) {
+            _isSelectionMode = false;
+          }
           _isLoading = false;
         });
       } else {
@@ -161,11 +177,31 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  List<Chat> _sortChatsByRecent(List<Chat> chats) {
+    final sorted = List<Chat>.from(chats);
+    sorted.sort((a, b) {
+      final aTime =
+          a.lastMessageAt ??
+          a.createdAt ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime =
+          b.lastMessageAt ??
+          b.createdAt ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
+    });
+    return sorted;
+  }
+
   List<Chat> get _filteredChats {
-    if (_searchQuery.isEmpty) return _chats;
-    return _chats.where((chat) {
+    final sorted = _sortChatsByRecent(_chats);
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) return sorted;
+
+    return sorted.where((chat) {
       final name = chat.otherUserName?.toLowerCase() ?? '';
-      return name.contains(_searchQuery.toLowerCase());
+      final lastMessage = chat.lastMessage?.toLowerCase() ?? '';
+      return name.contains(query) || lastMessage.contains(query);
     }).toList();
   }
 
@@ -199,75 +235,453 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  void _openChat(Chat chat) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatPage(
+          expertName: chat.otherUserName ?? 'Expert',
+          imagePath: 'assets/images/khushi.jpg',
+          chatId: chat.chatId,
+          otherUserAvatar: chat.otherUserAvatar,
+        ),
+      ),
+    ).then(_handleChatPageResult);
+  }
+
+  void _handleChatPageResult(dynamic result) {
+    if (!mounted) return;
+
+    if (result is Map && result['deletedChatId'] is String) {
+      final deletedChatId = result['deletedChatId'] as String;
+      setState(() {
+        _chats.removeWhere((chat) => chat.chatId == deletedChatId);
+        _selectedChatIds.remove(deletedChatId);
+        _archivedChatIds.remove(deletedChatId);
+        if (_selectedChatIds.isEmpty) {
+          _isSelectionMode = false;
+        }
+      });
+      return;
+    }
+
+    _loadChats();
+  }
+
+  void _startSelectionMode(String chatId) {
+    setState(() {
+      _isSelectionMode = true;
+      _selectedChatIds
+        ..clear()
+        ..add(chatId);
+    });
+  }
+
+  void _toggleChatSelection(String chatId) {
+    setState(() {
+      if (_selectedChatIds.contains(chatId)) {
+        _selectedChatIds.remove(chatId);
+      } else {
+        _selectedChatIds.add(chatId);
+      }
+
+      if (_selectedChatIds.isEmpty) {
+        _isSelectionMode = false;
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    if (!_isSelectionMode) return;
+    setState(() {
+      _isSelectionMode = false;
+      _selectedChatIds.clear();
+    });
+  }
+
+  bool get _allFilteredChatsSelected {
+    final filtered = _filteredChats;
+    if (filtered.isEmpty) return false;
+    return filtered.every((chat) => _selectedChatIds.contains(chat.chatId));
+  }
+
+  void _selectAllOrUnselectAll() {
+    final filteredIds = _filteredChats.map((chat) => chat.chatId).toSet();
+    if (filteredIds.isEmpty) return;
+
+    setState(() {
+      final allSelected = filteredIds.every(
+        (chatId) => _selectedChatIds.contains(chatId),
+      );
+      if (allSelected) {
+        _selectedChatIds.removeAll(filteredIds);
+        if (_selectedChatIds.isEmpty) {
+          _isSelectionMode = false;
+        }
+      } else {
+        _isSelectionMode = true;
+        _selectedChatIds.addAll(filteredIds);
+      }
+    });
+  }
+
+  void _handlePrimaryMenuAction(String action) {
+    if (action == 'select_all') {
+      _selectAllOrUnselectAll();
+    }
+  }
+
+  Future<void> _handleSelectionMenuAction(String action) async {
+    switch (action) {
+      case 'select_all':
+        _selectAllOrUnselectAll();
+        break;
+      case 'archive':
+        _toggleDraftArchiveForSelectedChats();
+        break;
+      case 'clear':
+        await _clearSelectedChats();
+        break;
+      case 'delete':
+        await _deleteSelectedChats();
+        break;
+    }
+  }
+
+  Future<void> _deleteSelectedChats() async {
+    if (_selectedChatIds.isEmpty) return;
+
+    final selectedIds = _selectedChatIds.toList(growable: false);
+    final selectedIdSet = selectedIds.toSet();
+    final confirmed = await _showConfirmationDialog(
+      title: 'Delete selected chats?',
+      content:
+          'This will remove ${selectedIds.length} selected chat(s) from your chat list.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+
+    final results = await Future.wait(
+      selectedIds.map((chatId) => _chatService.deleteChat(chatId)),
+    );
+
+    final failedIdSet = <String>{};
+    for (int index = 0; index < selectedIds.length; index++) {
+      if (!results[index]) {
+        failedIdSet.add(selectedIds[index]);
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _chats.removeWhere(
+        (chat) =>
+            selectedIdSet.contains(chat.chatId) &&
+            !failedIdSet.contains(chat.chatId),
+      );
+      _archivedChatIds.removeWhere(
+        (chatId) =>
+            selectedIdSet.contains(chatId) && !failedIdSet.contains(chatId),
+      );
+      _selectedChatIds.clear();
+      _isSelectionMode = false;
+    });
+
+    if (failedIdSet.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Deleted ${selectedIds.length - failedIdSet.length} chat(s). ${failedIdSet.length} failed.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Deleted ${selectedIds.length} chat(s)')),
+    );
+  }
+
+  void _toggleDraftArchiveForSelectedChats() {
+    if (_selectedChatIds.isEmpty) return;
+
+    final selectedIds = Set<String>.from(_selectedChatIds);
+    final allArchived = selectedIds.every(_archivedChatIds.contains);
+
+    setState(() {
+      if (allArchived) {
+        _archivedChatIds.removeAll(selectedIds);
+      } else {
+        _archivedChatIds.addAll(selectedIds);
+      }
+      _selectedChatIds.clear();
+      _isSelectionMode = false;
+    });
+
+    // TODO: Persist draft/archive state via backend endpoint when available.
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          allArchived
+              ? 'Chats moved back to inbox'
+              : 'Chats marked as draft/archived',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _clearSelectedChats() async {
+    if (_selectedChatIds.isEmpty) return;
+
+    final selectedIds = _selectedChatIds.toList(growable: false);
+    final selectedIdSet = selectedIds.toSet();
+    final confirmed = await _showConfirmationDialog(
+      title: 'Clear selected chats?',
+      content:
+          'Messages for ${selectedIds.length} selected chat(s) will be cleared.',
+      confirmLabel: 'Clear',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+
+    final results = await Future.wait(
+      selectedIds.map((chatId) => _chatService.clearChat(chatId)),
+    );
+    final failedIdSet = <String>{};
+    for (int index = 0; index < selectedIds.length; index++) {
+      if (!results[index]) {
+        failedIdSet.add(selectedIds[index]);
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _chats = _chats.map((chat) {
+        if (!selectedIdSet.contains(chat.chatId) ||
+            failedIdSet.contains(chat.chatId)) {
+          return chat;
+        }
+        return Chat(
+          chatId: chat.chatId,
+          user1Id: chat.user1Id,
+          user2Id: chat.user2Id,
+          lastMessageAt: null,
+          createdAt: chat.createdAt,
+          otherUserName: chat.otherUserName,
+          otherUserAvatar: chat.otherUserAvatar,
+          lastMessage: null,
+          unreadCount: 0,
+        );
+      }).toList();
+      _selectedChatIds.clear();
+      _isSelectionMode = false;
+    });
+
+    if (failedIdSet.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cleared ${selectedIds.length - failedIdSet.length} chat(s). ${failedIdSet.length} failed.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Selected chats cleared')));
+  }
+
+  Future<bool> _showConfirmationDialog({
+    required String title,
+    required String content,
+    required String confirmLabel,
+    bool destructive = false,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: destructive
+                ? TextButton.styleFrom(foregroundColor: Colors.red)
+                : null,
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed ?? false;
+  }
+
   // ============================================
   // BUILD
   // ============================================
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.pinkAccent,
-        title: const Text(
-          'Chats',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.pinkAccent,
-        onPressed: _openNewChatPicker,
-        child: const Icon(Icons.chat, color: Colors.white),
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFFFEBEE), Color(0xFFFCE4EC)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+    return PopScope(
+      canPop: !_isSelectionMode,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _isSelectionMode) {
+          _exitSelectionMode();
+        }
+      },
+      child: Scaffold(
+        appBar: _buildAppBar(),
+        floatingActionButton: _isSelectionMode
+            ? null
+            : FloatingActionButton(
+                backgroundColor: Colors.pinkAccent,
+                onPressed: _openNewChatPicker,
+                child: const Icon(Icons.chat, color: Colors.white),
+              ),
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFFFFEBEE), Color(0xFFFCE4EC)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
           ),
-        ),
-        child: Column(
-          children: [
-            // Search Bar
-            Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: TextField(
-                controller: _searchController,
-                onChanged: (value) => setState(() => _searchQuery = value),
-                decoration: InputDecoration(
-                  hintText: 'Search chats...',
-                  prefixIcon: const Icon(Icons.search, color: Colors.pinkAccent),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30),
-                    borderSide:
-                        BorderSide(color: Colors.pinkAccent.withOpacity(0.3)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(30),
-                    borderSide: const BorderSide(color: Colors.pinkAccent),
+          child: Column(
+            children: [
+              // Search Bar
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: TextField(
+                  controller: _searchController,
+                  onChanged: (value) => setState(() => _searchQuery = value),
+                  decoration: InputDecoration(
+                    hintText: 'Search chats...',
+                    prefixIcon: const Icon(
+                      Icons.search,
+                      color: Colors.pinkAccent,
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      vertical: 10,
+                      horizontal: 15,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(30),
+                      borderSide: BorderSide.none,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(30),
+                      borderSide: BorderSide(
+                        color: Colors.pinkAccent.withOpacity(0.3),
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(30),
+                      borderSide: const BorderSide(color: Colors.pinkAccent),
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            // Chat list or empty state
-            Expanded(child: _buildContent()),
-          ],
+              // Chat list or empty state
+              Expanded(child: _buildContent()),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  AppBar _buildAppBar() {
+    if (_isSelectionMode) {
+      final allSelected = _allFilteredChatsSelected;
+      return AppBar(
+        elevation: 0,
+        backgroundColor: Colors.pinkAccent,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: _exitSelectionMode,
+        ),
+        title: Text(
+          '${_selectedChatIds.length} selected',
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              allSelected ? Icons.deselect : Icons.select_all,
+              color: Colors.white,
+            ),
+            tooltip: allSelected ? 'Unselect all' : 'Select all',
+            onPressed: _filteredChats.isEmpty ? null : _selectAllOrUnselectAll,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.white),
+            tooltip: 'Delete',
+            onPressed: _selectedChatIds.isEmpty ? null : _deleteSelectedChats,
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            onSelected: (value) => _handleSelectionMenuAction(value),
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                value: 'select_all',
+                child: Text(allSelected ? 'Unselect all' : 'Select all'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'archive',
+                child: Text('Draft/Archive'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'clear',
+                child: Text('Clear chat'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'delete',
+                child: Text('Delete'),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return AppBar(
+      elevation: 0,
+      backgroundColor: Colors.pinkAccent,
+      title: const Text(
+        'Chats',
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 22),
+      ),
+      leading: IconButton(
+        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        onPressed: () => Navigator.pop(context),
+      ),
+      actions: [
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Colors.white),
+          onSelected: _handlePrimaryMenuAction,
+          itemBuilder: (context) => [
+            if (_filteredChats.isNotEmpty)
+              const PopupMenuItem<String>(
+                value: 'select_all',
+                child: Text('Select all'),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -301,10 +715,10 @@ class _ChatScreenState extends State<ChatScreen> {
             const SizedBox(height: 16),
             ElevatedButton(
               onPressed: _loadChats,
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: Colors.pinkAccent),
-              child:
-                  const Text('Retry', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.pinkAccent,
+              ),
+              child: const Text('Retry', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -334,26 +748,35 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _buildChatTile(Chat chat) {
     final hasUnread = chat.unreadCount > 0;
     final isOnline = _isOtherUserOnline(chat);
+    final isSelected = _selectedChatIds.contains(chat.chatId);
+    final isArchived = _archivedChatIds.contains(chat.chatId);
 
     return InkWell(
+      onLongPress: () {
+        if (_isSelectionMode) {
+          _toggleChatSelection(chat.chatId);
+        } else {
+          _startSelectionMode(chat.chatId);
+        }
+      },
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ChatPage(
-              expertName: chat.otherUserName ?? 'Expert',
-              imagePath: 'assets/images/khushi.jpg',
-              chatId: chat.chatId,
-              otherUserAvatar: chat.otherUserAvatar,
-            ),
-          ),
-        ).then((_) => _loadChats());
+        if (_isSelectionMode) {
+          _toggleChatSelection(chat.chatId);
+          return;
+        }
+        _openChat(chat);
       },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
+          color: isSelected
+              ? Colors.pinkAccent.withOpacity(0.12)
+              : Colors.transparent,
           border: Border(
-            bottom: BorderSide(color: Colors.pinkAccent.withOpacity(0.15), width: 1),
+            bottom: BorderSide(
+              color: Colors.pinkAccent.withOpacity(0.15),
+              width: 1,
+            ),
           ),
         ),
         child: Row(
@@ -365,14 +788,20 @@ class _ChatScreenState extends State<ChatScreen> {
                   radius: 28,
                   backgroundColor: const Color(0xFFFFF1F5),
                   backgroundImage: _resolveAvatar(chat.otherUserAvatar),
-                  onBackgroundImageError: (chat.otherUserAvatar != null &&
+                  onBackgroundImageError:
+                      (chat.otherUserAvatar != null &&
                           chat.otherUserAvatar!.isNotEmpty &&
                           chat.otherUserAvatar!.startsWith('http'))
                       ? (_, __) {} // silently ignore network errors
                       : null,
-                  child: (chat.otherUserAvatar == null ||
+                  child:
+                      (chat.otherUserAvatar == null ||
                           chat.otherUserAvatar!.isEmpty)
-                      ? const Icon(Icons.person, size: 30, color: Colors.pinkAccent)
+                      ? const Icon(
+                          Icons.person,
+                          size: 30,
+                          color: Colors.pinkAccent,
+                        )
                       : null,
                 ),
                 Positioned(
@@ -388,6 +817,30 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ),
+                if (_isSelectionMode)
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.pinkAccent : Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.pinkAccent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: isSelected
+                          ? const Icon(
+                              Icons.check,
+                              size: 12,
+                              color: Colors.white,
+                            )
+                          : null,
+                    ),
+                  ),
               ],
             ),
             const SizedBox(width: 14),
@@ -397,27 +850,51 @@ class _ChatScreenState extends State<ChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    chat.otherUserName ?? 'Expert',
-                    style: TextStyle(
-                      fontWeight:
-                          hasUnread ? FontWeight.bold : FontWeight.w600,
-                      fontSize: 16,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          chat.otherUserName ?? 'Expert',
+                          style: TextStyle(
+                            fontWeight: hasUnread
+                                ? FontWeight.bold
+                                : FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isArchived)
+                        const Icon(
+                          Icons.archive_outlined,
+                          size: 14,
+                          color: Colors.pinkAccent,
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 4),
+                  if (isArchived)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 2),
+                      child: Text(
+                        'Draft/Archived',
+                        style: TextStyle(
+                          color: Colors.pinkAccent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   Text(
                     chat.lastMessage ?? 'Tap to start chatting',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: hasUnread
-                          ? Colors.black87
-                          : Colors.grey.shade600,
-                      fontWeight:
-                          hasUnread ? FontWeight.w500 : FontWeight.normal,
+                      color: hasUnread ? Colors.black87 : Colors.grey.shade600,
+                      fontWeight: hasUnread
+                          ? FontWeight.w500
+                          : FontWeight.normal,
                       fontSize: 14,
                     ),
                   ),
@@ -441,8 +918,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(height: 6),
                 if (hasUnread)
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.pinkAccent,
                       borderRadius: BorderRadius.circular(12),
@@ -479,9 +958,14 @@ class _ChatScreenState extends State<ChatScreen> {
     if (dt == null) return null;
     if (dt.isUtc) return dt;
     return DateTime.utc(
-      dt.year, dt.month, dt.day,
-      dt.hour, dt.minute, dt.second,
-      dt.millisecond, dt.microsecond,
+      dt.year,
+      dt.month,
+      dt.day,
+      dt.hour,
+      dt.minute,
+      dt.second,
+      dt.millisecond,
+      dt.microsecond,
     );
   }
 
@@ -513,8 +997,11 @@ class _ChatScreenState extends State<ChatScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.chat_bubble_outline,
-              size: 80, color: Colors.pinkAccent.withOpacity(0.5)),
+          Icon(
+            Icons.chat_bubble_outline,
+            size: 80,
+            color: Colors.pinkAccent.withOpacity(0.5),
+          ),
           const SizedBox(height: 16),
           const Text(
             'No chats yet',
@@ -533,14 +1020,16 @@ class _ChatScreenState extends State<ChatScreen> {
           ElevatedButton.icon(
             onPressed: _openNewChatPicker,
             icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text('New Chat',
-                style: TextStyle(color: Colors.white)),
+            label: const Text(
+              'New Chat',
+              style: TextStyle(color: Colors.white),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.pinkAccent,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
           ),
         ],
@@ -635,11 +1124,14 @@ class _ListenerPickerSheetState extends State<_ListenerPickerSheet> {
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            const Text('Start New Chat',
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF880E4F))),
+            const Text(
+              'Start New Chat',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF880E4F),
+              ),
+            ),
             const SizedBox(height: 8),
             // Search
             Padding(
@@ -649,16 +1141,20 @@ class _ListenerPickerSheetState extends State<_ListenerPickerSheet> {
                 onChanged: (v) => setState(() => _search = v),
                 decoration: InputDecoration(
                   hintText: 'Search experts...',
-                  prefixIcon:
-                      const Icon(Icons.search, color: Colors.pinkAccent),
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: Colors.pinkAccent,
+                  ),
                   filled: true,
                   fillColor: const Color(0xFFFFF1F5),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(30),
                     borderSide: BorderSide.none,
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: 10, horizontal: 15),
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 10,
+                    horizontal: 15,
+                  ),
                 ),
               ),
             ),
@@ -667,78 +1163,86 @@ class _ListenerPickerSheetState extends State<_ListenerPickerSheet> {
             Expanded(
               child: _isLoading
                   ? const Center(
-                      child:
-                          CircularProgressIndicator(color: Colors.pinkAccent))
+                      child: CircularProgressIndicator(
+                        color: Colors.pinkAccent,
+                      ),
+                    )
                   : _filtered.isEmpty
-                      ? const Center(
-                          child: Text('No experts found',
-                              style: TextStyle(color: Colors.grey)))
-                      : ListView.builder(
-                          controller: scrollCtrl,
-                          itemCount: _filtered.length,
-                          itemBuilder: (_, i) {
-                            final l = _filtered[i];
-                            final online = _socketService
-                                    .listenerOnlineMap[l.userId] ??
-                                l.isOnline;
-                            return ListTile(
-                              leading: Stack(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 24,
-                                    backgroundColor: const Color(0xFFFFF1F5),
-                                    backgroundImage: _resolveAvatar(l.avatarUrl),
-                                    child: (l.avatarUrl == null || l.avatarUrl!.isEmpty)
-                                        ? const Icon(Icons.person, size: 26, color: Colors.pinkAccent)
-                                        : null,
-                                  ),
-                                  Positioned(
-                                    right: 0,
-                                    bottom: 0,
-                                    child: Container(
-                                      width: 12,
-                                      height: 12,
-                                      decoration: BoxDecoration(
-                                        color: online
-                                            ? Colors.green
-                                            : Colors.grey.shade400,
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                            color: Colors.white, width: 2),
-                                      ),
+                  ? const Center(
+                      child: Text(
+                        'No experts found',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
+                  : ListView.builder(
+                      controller: scrollCtrl,
+                      itemCount: _filtered.length,
+                      itemBuilder: (_, i) {
+                        final l = _filtered[i];
+                        final online =
+                            _socketService.listenerOnlineMap[l.userId] ??
+                            l.isOnline;
+                        return ListTile(
+                          leading: Stack(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor: const Color(0xFFFFF1F5),
+                                backgroundImage: _resolveAvatar(l.avatarUrl),
+                                child:
+                                    (l.avatarUrl == null ||
+                                        l.avatarUrl!.isEmpty)
+                                    ? const Icon(
+                                        Icons.person,
+                                        size: 26,
+                                        color: Colors.pinkAccent,
+                                      )
+                                    : null,
+                              ),
+                              Positioned(
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: online
+                                        ? Colors.green
+                                        : Colors.grey.shade400,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
                                     ),
                                   ),
-                                ],
-                              ),
-                              title: Text(
-                                l.professionalName ?? 'Expert',
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.w600),
-                              ),
-                              subtitle: Text(
-                                l.specialties.isNotEmpty
-                                    ? l.specialties.first
-                                    : (online ? 'Online' : 'Offline'),
-                                style: TextStyle(
-                                  color: online
-                                      ? Colors.pinkAccent
-                                      : Colors.grey,
-                                  fontSize: 13,
                                 ),
                               ),
-                              trailing: Text(
-                                online ? 'Online' : 'Offline',
-                                style: TextStyle(
-                                  color: online
-                                      ? Colors.green
-                                      : Colors.grey,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              onTap: () => Navigator.pop(context, l),
-                            );
-                          },
-                        ),
+                            ],
+                          ),
+                          title: Text(
+                            l.professionalName ?? 'Expert',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          subtitle: Text(
+                            l.specialties.isNotEmpty
+                                ? l.specialties.first
+                                : (online ? 'Online' : 'Offline'),
+                            style: TextStyle(
+                              color: online ? Colors.pinkAccent : Colors.grey,
+                              fontSize: 13,
+                            ),
+                          ),
+                          trailing: Text(
+                            online ? 'Online' : 'Offline',
+                            style: TextStyle(
+                              color: online ? Colors.green : Colors.grey,
+                              fontSize: 12,
+                            ),
+                          ),
+                          onTap: () => Navigator.pop(context, l),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

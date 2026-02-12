@@ -12,7 +12,22 @@ class Chat {
     const findResult = await pool.query(findQuery, [user1_id, user2_id]);
 
     if (findResult.rows.length > 0) {
-      return findResult.rows[0];
+      const existing = findResult.rows[0];
+
+      // If chat was previously soft-deleted, reactivate it so it appears again
+      // in recent chats when users continue the conversation.
+      if (existing.is_active === false) {
+        const reactivateQuery = `
+          UPDATE chats
+          SET is_active = TRUE
+          WHERE chat_id = $1
+          RETURNING *
+        `;
+        const reactivateResult = await pool.query(reactivateQuery, [existing.chat_id]);
+        return reactivateResult.rows[0];
+      }
+
+      return existing;
     }
 
     // Create new chat if doesn't exist
@@ -58,7 +73,15 @@ class Chat {
       LEFT JOIN listeners l1 ON c.user1_id = l1.user_id
       LEFT JOIN listeners l2 ON c.user2_id = l2.user_id
       WHERE (c.user1_id = $1 OR c.user2_id = $1)
-        AND c.is_active = TRUE
+        AND (
+          COALESCE(c.is_active, TRUE) = TRUE
+          OR c.last_message IS NOT NULL
+          OR EXISTS (
+            SELECT 1
+            FROM messages m2
+            WHERE m2.chat_id = c.chat_id
+          )
+        )
       ORDER BY c.last_message_at DESC NULLS LAST, c.created_at DESC
     `;
     const result = await pool.query(query, [user_id]);
@@ -81,6 +104,21 @@ class Chat {
   static async deactivate(chat_id) {
     const query = 'UPDATE chats SET is_active = FALSE WHERE chat_id = $1';
     await pool.query(query, [chat_id]);
+  }
+
+  // Clear chat messages while keeping chat relationship intact
+  static async clearMessages(chat_id) {
+    await pool.query('DELETE FROM messages WHERE chat_id = $1', [chat_id]);
+    const query = `
+      UPDATE chats
+      SET last_message = NULL,
+          last_message_at = NULL,
+          is_active = TRUE
+      WHERE chat_id = $1
+      RETURNING *
+    `;
+    const result = await pool.query(query, [chat_id]);
+    return result.rows[0];
   }
 }
 

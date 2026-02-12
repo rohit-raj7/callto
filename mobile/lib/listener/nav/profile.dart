@@ -688,6 +688,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   int? _selectedAvatarIndex;
 
   final List<String> _avatarImages = [
+    'assets/images/female_profile/avatar1.jpg',
     'assets/images/female_profile/avatar2.jpg',
     'assets/images/female_profile/avatar3.jpg',
     'assets/images/female_profile/avatar4.jpg',
@@ -702,6 +703,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     'assets/images/female_profile/avatar13.jpg',
     'assets/images/female_profile/avatar14.jpg',
     'assets/images/female_profile/avatar15.jpg',
+    'assets/images/female_profile/avatar16.jpg',
   ];
 
   @override

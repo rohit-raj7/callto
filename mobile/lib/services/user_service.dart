@@ -29,11 +29,8 @@ class UserService {
     if (response.isSuccess) {
       final user = User.fromJson(response.data['user']);
       await _storage.saveUserData(jsonEncode(response.data['user']));
-      
-      return UserResult(
-        success: true,
-        user: user,
-      );
+
+      return UserResult(success: true, user: user);
     } else {
       return UserResult(
         success: false,
@@ -70,7 +67,7 @@ class UserService {
     if (response.isSuccess) {
       final user = User.fromJson(response.data['user']);
       await _storage.saveUserData(jsonEncode(response.data['user']));
-      
+
       return UserResult(
         success: true,
         user: user,
@@ -90,11 +87,8 @@ class UserService {
 
     if (response.isSuccess) {
       final user = User.fromJson(response.data['user']);
-      
-      return UserResult(
-        success: true,
-        user: user,
-      );
+
+      return UserResult(success: true, user: user);
     } else {
       return UserResult(
         success: false,
@@ -110,10 +104,7 @@ class UserService {
   }) async {
     final response = await _api.post(
       ApiConfig.userLanguages,
-      body: {
-        'language': language,
-        'proficiency_level': proficiencyLevel,
-      },
+      body: {'language': language, 'proficiency_level': proficiencyLevel},
     );
 
     return response.isSuccess;
@@ -127,13 +118,15 @@ class UserService {
       final List<dynamic> languagesJson = response.data['languages'] ?? [];
       return languagesJson.cast<Map<String, dynamic>>();
     }
-    
+
     return [];
   }
 
   /// Delete language
   Future<bool> deleteLanguage(String languageId) async {
-    final response = await _api.delete('${ApiConfig.userLanguages}/$languageId');
+    final response = await _api.delete(
+      '${ApiConfig.userLanguages}/$languageId',
+    );
     return response.isSuccess;
   }
 
@@ -142,7 +135,9 @@ class UserService {
     final response = await _api.get(ApiConfig.userWallet);
 
     if (response.isSuccess) {
-      final data = response.data is Map ? response.data as Map : <String, dynamic>{};
+      final data = response.data is Map
+          ? response.data as Map
+          : <String, dynamic>{};
       final wallet = data['wallet'] is Map ? data['wallet'] as Map : data;
       final transactions = wallet['transactions'] ?? data['transactions'] ?? [];
       return WalletResult(
@@ -159,7 +154,11 @@ class UserService {
   }
 
   /// Add balance to wallet
-  Future<WalletResult> addBalance(double amount, {String? paymentId, String? packId}) async {
+  Future<WalletResult> addBalance(
+    double amount, {
+    String? paymentId,
+    String? packId,
+  }) async {
     final response = await _api.post(
       '${ApiConfig.userWallet}/add',
       body: {
@@ -185,6 +184,97 @@ class UserService {
       );
     }
   }
+
+  /// Block another user
+  Future<ActionResult> blockUser(String blockedUserId, {String? reason}) async {
+    final response = await _api.post(
+      '${ApiConfig.apiBase}/users/block/$blockedUserId',
+      body: {
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
+
+    if (response.isSuccess) {
+      return ActionResult(
+        success: true,
+        message:
+            response.data['message']?.toString() ?? 'User blocked successfully',
+      );
+    }
+
+    return ActionResult(
+      success: false,
+      error: response.error ?? 'Failed to block user',
+    );
+  }
+
+  /// Unblock a user
+  Future<ActionResult> unblockUser(String blockedUserId) async {
+    final response = await _api.delete(
+      '${ApiConfig.apiBase}/users/block/$blockedUserId',
+    );
+
+    if (response.isSuccess) {
+      return ActionResult(
+        success: true,
+        message:
+            response.data['message']?.toString() ?? 'User unblocked successfully',
+      );
+    }
+
+    return ActionResult(
+      success: false,
+      error: response.error ?? 'Failed to unblock user',
+    );
+  }
+
+  /// Get users blocked by the current user
+  Future<List<BlockedUser>> getBlockedUsers() async {
+    final response = await _api.get('${ApiConfig.apiBase}/users/blocked');
+    if (!response.isSuccess) return [];
+
+    final List<dynamic> blockedJson = response.data['blocked_users'] ?? [];
+    return blockedJson
+        .whereType<Map>()
+        .map((json) => BlockedUser.fromJson(Map<String, dynamic>.from(json)))
+        .toList();
+  }
+
+  /// Check if current user has blocked a specific user
+  Future<bool> isUserBlocked(String userId) async {
+    final blockedUsers = await getBlockedUsers();
+    return blockedUsers.any((blockedUser) => blockedUser.userId == userId);
+  }
+
+  /// Report another user
+  Future<ActionResult> reportUser(
+    String reportedUserId, {
+    String reportType = 'chat',
+    String? description,
+  }) async {
+    final response = await _api.post(
+      '${ApiConfig.apiBase}/users/report/$reportedUserId',
+      body: {
+        'report_type': reportType,
+        if (description != null && description.trim().isNotEmpty)
+          'description': description.trim(),
+      },
+    );
+
+    if (response.isSuccess) {
+      return ActionResult(
+        success: true,
+        message:
+            response.data['message']?.toString() ??
+            'Report submitted successfully',
+      );
+    }
+
+    return ActionResult(
+      success: false,
+      error: response.error ?? 'Failed to submit report',
+    );
+  }
 }
 
 /// Result class for user operations
@@ -194,12 +284,7 @@ class UserResult {
   final String? message;
   final String? error;
 
-  UserResult({
-    required this.success,
-    this.user,
-    this.message,
-    this.error,
-  });
+  UserResult({required this.success, this.user, this.message, this.error});
 }
 
 /// Result class for wallet operations
@@ -221,4 +306,41 @@ class WalletResult {
     this.message,
     this.error,
   });
+}
+
+/// Generic result for simple action endpoints
+class ActionResult {
+  final bool success;
+  final String? message;
+  final String? error;
+
+  ActionResult({required this.success, this.message, this.error});
+}
+
+class BlockedUser {
+  final String userId;
+  final String? displayName;
+  final String? avatarUrl;
+  final String? reason;
+  final DateTime? blockedAt;
+
+  BlockedUser({
+    required this.userId,
+    this.displayName,
+    this.avatarUrl,
+    this.reason,
+    this.blockedAt,
+  });
+
+  factory BlockedUser.fromJson(Map<String, dynamic> json) {
+    return BlockedUser(
+      userId: json['user_id']?.toString() ?? '',
+      displayName: json['display_name']?.toString(),
+      avatarUrl: json['avatar_url']?.toString(),
+      reason: json['reason']?.toString(),
+      blockedAt: json['blocked_at'] != null
+          ? DateTime.tryParse(json['blocked_at'].toString())
+          : null,
+    );
+  }
 }

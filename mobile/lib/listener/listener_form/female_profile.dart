@@ -29,6 +29,7 @@ class _FemaleProfilePageState extends State<FemaleProfilePage> {
   int? selectedAvatarIndex;
 
   final List<String> avatarImages = [
+    'assets/images/female_profile/avatar1.jpg',
     'assets/images/female_profile/avatar2.jpg',
     'assets/images/female_profile/avatar3.jpg',
     'assets/images/female_profile/avatar4.jpg',
@@ -43,6 +44,7 @@ class _FemaleProfilePageState extends State<FemaleProfilePage> {
     'assets/images/female_profile/avatar13.jpg',
     'assets/images/female_profile/avatar14.jpg',
     'assets/images/female_profile/avatar15.jpg',
+    'assets/images/female_profile/avatar16.jpg',
   ];
 
   Future<void> _submitProfile() async {

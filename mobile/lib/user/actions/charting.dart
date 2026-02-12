@@ -33,7 +33,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   final ChatService _chatService = ChatService();
   final StorageService _storage = StorageService();
   final ChatStateManager _chatStateManager = ChatStateManager();
-  
+
   final List<Message> _messages = [];
   String? _chatId;
   String? _currentUserId;
@@ -41,23 +41,25 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   bool _isLoading = true;
   bool _isTyping = false;
   bool _otherUserTyping = false;
-  final bool _otherUserOnline = true; // Assume online initially since they're a listener
+  final bool _otherUserOnline =
+      true; // Assume online initially since they're a listener
   String? _errorMessage;
-  
+
   // Track if we've received history from socket
   bool _historyReceived = false;
-  
+
   // WhatsApp-style delete: Track locally deleted messages
   Set<String> _deletedForMe = {};
   Set<String> _deletedForEveryone = {};
-  
+
   // Stream subscriptions
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
   StreamSubscription<Map<String, dynamic>>? _historySubscription;
   StreamSubscription<Map<String, dynamic>>? _typingSubscription;
   StreamSubscription<Map<String, dynamic>>? _errorSubscription;
   StreamSubscription<Map<String, dynamic>>? _readSubscription;
-  StreamSubscription<Map<String, dynamic>>? _deleteSubscription; // For delete events
+  StreamSubscription<Map<String, dynamic>>?
+  _deleteSubscription; // For delete events
 
   @override
   void initState() {
@@ -93,7 +95,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     try {
       // Get current user ID
       _currentUserId = await _storage.getUserId();
-      
+
       if (_currentUserId == null) {
         setState(() {
           _errorMessage = 'User not logged in';
@@ -117,10 +119,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         } else {
           // VERIFICATION: Handle listener verification failures
           final error = result.error ?? 'Failed to create chat';
-          final userFriendlyError = error.toLowerCase().contains('not approved') 
+          final userFriendlyError = error.toLowerCase().contains('not approved')
               ? 'This listener is not available for chat at the moment'
               : error;
-          
+
           setState(() {
             _errorMessage = userFriendlyError;
             _isLoading = false;
@@ -137,6 +139,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
       // Set other user ID for delete for everyone feature
       _otherUserId = widget.otherUserId;
+      await _resolveOtherUserIdIfNeeded();
 
       // Ensure socket is connected
       final connected = await _socketService.connect();
@@ -156,10 +159,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       // 2. Update ChatStateManager to track we're viewing this chat
       // 3. Tell server we're actively viewing (no notifications)
       _socketService.joinChatRoom(_chatId!);
-      
+
       // Also load messages from API as fallback (in case socket history doesn't arrive)
       _loadMessagesFromApi();
-      
+
       setState(() {
         _isLoading = false;
       });
@@ -171,13 +174,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _resolveOtherUserIdIfNeeded() async {
+    if (_otherUserId != null && _otherUserId!.isNotEmpty) return;
+    if (_chatId == null || _currentUserId == null) return;
+
+    final result = await _chatService.getChatById(_chatId!);
+    if (!result.success || result.chat == null) return;
+
+    final chat = result.chat!;
+    _otherUserId = chat.user1Id == _currentUserId ? chat.user2Id : chat.user1Id;
+  }
+
   /// Load messages from REST API as fallback
   Future<void> _loadMessagesFromApi() async {
     if (_chatId == null) return;
-    
+
     // Short wait for socket history, then load from API if not received
     await Future.delayed(const Duration(milliseconds: 200));
-    
+
     if (!_historyReceived && mounted) {
       print('[ChatPage] Socket history not received, loading from API');
       try {
@@ -186,14 +200,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           limit: 50,
           offset: 0,
         );
-        
+
         if (result.success && mounted && !_historyReceived) {
           setState(() {
             _messages.clear();
             _messages.addAll(result.messages);
           });
           _scrollToBottom();
-          
+
           // Mark messages as read
           _socketService.markChatAsRead(_chatId!);
         }
@@ -211,20 +225,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (chatId == _chatId && data['message'] != null) {
         final messageData = data['message'] as Map<String, dynamic>;
         final message = Message.fromJson(messageData);
-        
-        print('[ChatPage] Received message from socket: ${message.messageContent} (senderId: ${message.senderId})');
-        print('[ChatPage] TIMESTAMP DEBUG: raw=${messageData['created_at']}, parsed=${message.createdAt}, isUtc=${message.createdAt?.isUtc}, local=${message.createdAt?.toLocal()}');
-        
+
+        print(
+          '[ChatPage] Received message from socket: ${message.messageContent} (senderId: ${message.senderId})',
+        );
+        print(
+          '[ChatPage] TIMESTAMP DEBUG: raw=${messageData['created_at']}, parsed=${message.createdAt}, isUtc=${message.createdAt?.isUtc}, local=${message.createdAt?.toLocal()}',
+        );
+
         setState(() {
           // Check if this is confirmation of our own message (replace optimistic)
           if (message.senderId == _currentUserId) {
             // Find and replace the optimistic message with same content
-            final optimisticIndex = _messages.indexWhere((m) => 
-              m.messageId.startsWith('temp_') && 
-              m.messageContent == message.messageContent);
-            
+            final optimisticIndex = _messages.indexWhere(
+              (m) =>
+                  m.messageId.startsWith('temp_') &&
+                  m.messageContent == message.messageContent,
+            );
+
             if (optimisticIndex != -1) {
-              print('[ChatPage] Replacing optimistic message with confirmed message');
+              print(
+                '[ChatPage] Replacing optimistic message with confirmed message',
+              );
               // DEVICE-TIME FIX: Preserve the device local timestamp from the
               // optimistic message for display. This ensures the sent message
               // time always matches the device clock when the user pressed send
@@ -245,7 +267,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               return; // Already updated
             }
           }
-          
+
           // Check for duplicates by messageId
           if (!_messages.any((m) => m.messageId == message.messageId)) {
             _messages.add(message);
@@ -255,7 +277,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           }
         });
         _scrollToBottom();
-        
+
         // Mark as read if from other user (we're viewing the chat)
         if (message.senderId != _currentUserId) {
           _socketService.markChatAsRead(_chatId!);
@@ -269,9 +291,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (chatId == _chatId && data['messages'] != null) {
         _historyReceived = true;
         final messagesList = data['messages'] as List;
-        
+
         print('[ChatPage] Received history: ${messagesList.length} messages');
-        
+
         setState(() {
           _messages.clear();
           for (var msgData in messagesList) {
@@ -279,7 +301,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           }
         });
         _scrollToBottom();
-        
+
         // Mark messages as read
         _socketService.markChatAsRead(_chatId!);
       }
@@ -320,13 +342,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _deleteSubscription = _socketService.onMessageDeleted.listen((data) {
       final messageId = data['messageId']?.toString();
       final chatId = data['chatId']?.toString();
-      
+
       if (messageId != null && (chatId == _chatId || chatId == null)) {
         print('[ChatPage] Message deleted event received: $messageId');
-        
+
         // Save to local storage as "deleted for everyone"
         _storage.addDeletedForEveryone(messageId);
-        
+
         // Update local state
         setState(() {
           _deletedForEveryone.add(messageId);
@@ -339,12 +361,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void dispose() {
     // Remove lifecycle observer
     WidgetsBinding.instance.removeObserver(this);
-    
+
     // Leave chat room - this updates ChatStateManager and notifies server
     if (_chatId != null) {
       _socketService.leaveChatRoom(_chatId!);
     }
-    
+
     // Cancel subscriptions
     _messageSubscription?.cancel();
     _historySubscription?.cancel();
@@ -352,7 +374,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _readSubscription?.cancel();
     _errorSubscription?.cancel();
     _deleteSubscription?.cancel();
-    
+
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -367,7 +389,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
     // Create temporary message ID for optimistic update
     final tempId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
-    
+
     // DEVICE-TIME FIX: Use device local time for instant display.
     // This timestamp matches the user's device clock at the moment they pressed send.
     // It is NOT replaced by server time when the server confirms the message.
@@ -381,7 +403,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       createdAt: DateTime.now(), // Device local time — matches user's clock
       isRead: false,
     );
-    
+
     setState(() {
       _messages.add(optimisticMessage);
     });
@@ -390,10 +412,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // Try socket first (for real-time delivery to other user)
     if (_socketService.isConnected) {
       print('[ChatPage] Sending message via socket');
-      _socketService.sendChatMessage(
-        chatId: _chatId!,
-        content: text,
-      );
+      _socketService.sendChatMessage(chatId: _chatId!, content: text);
     } else {
       // Socket not connected - try to reconnect and use API fallback
       print('[ChatPage] Socket not connected, using API fallback');
@@ -402,7 +421,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           chatId: _chatId!,
           content: text,
         );
-        
+
         if (result.success && result.message != null) {
           // Replace optimistic message with real one
           setState(() {
@@ -419,10 +438,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           if (mounted) {
             // VERIFICATION: Show user-friendly error for verification failures
             final error = result.error ?? 'Failed to send message';
-            final userFriendlyError = error.toLowerCase().contains('not approved') 
+            final userFriendlyError =
+                error.toLowerCase().contains('not approved')
                 ? 'This listener is not available for chat at the moment'
                 : error;
-            
+
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(userFriendlyError),
@@ -439,7 +459,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           _messages.removeWhere((m) => m.messageId == tempId);
         });
       }
-      
+
       // Try to reconnect socket for future messages
       _socketService.connect().then((_) {
         if (_chatId != null) {
@@ -496,8 +516,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final now = DateTime.now();
     final diff = now.difference(local);
     if (diff.inDays == 0 && now.day == local.day) return 'Today';
-    if (diff.inDays == 1 || (diff.inDays == 0 && now.day != local.day)) return 'Yesterday';
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    if (diff.inDays == 1 || (diff.inDays == 0 && now.day != local.day))
+      return 'Yesterday';
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${local.day} ${months[local.month - 1]} ${local.year}';
   }
 
@@ -539,32 +573,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              
+
               // Delete for Me option (available for all messages)
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.grey),
                 title: const Text('Delete for Me'),
-                subtitle: const Text('This message will be removed from your device only'),
+                subtitle: const Text(
+                  'This message will be removed from your device only',
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _deleteForMe(message);
                 },
               ),
-              
+
               // Delete for Everyone option (only for sender's own messages)
               if (isUserMessage) ...[
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.delete_forever, color: Colors.red),
-                  title: const Text('Delete for Everyone', style: TextStyle(color: Colors.red)),
-                  subtitle: const Text('This message will be deleted for everyone'),
+                  title: const Text(
+                    'Delete for Everyone',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  subtitle: const Text(
+                    'This message will be deleted for everyone',
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     _confirmDeleteForEveryone(message);
                   },
                 ),
               ],
-              
+
               const Divider(height: 1),
               ListTile(
                 leading: const Icon(Icons.close, color: Colors.grey),
@@ -583,7 +624,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   void _deleteForMe(Message message) async {
     // Save to local storage
     await _storage.addDeletedForMe(message.messageId);
-    
+
     // Update UI immediately
     setState(() {
       _deletedForMe.add(message.messageId);
@@ -655,6 +696,116 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _handleConversationMenuSelection(String action) async {
+    switch (action) {
+      case 'clear':
+        await _clearChatMessages();
+        break;
+      case 'delete':
+        await _deleteChatConversation();
+        break;
+    }
+  }
+
+  Future<void> _clearChatMessages() async {
+    final chatId = _chatId;
+    if (chatId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Chat is not ready yet')));
+      return;
+    }
+
+    final confirmed = await _showChatActionConfirmation(
+      title: 'Clear chat?',
+      content: 'This removes messages from this screen for now.',
+      confirmLabel: 'Clear',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+
+    final cleared = await _chatService.clearChat(chatId);
+    if (!mounted) return;
+
+    if (!cleared) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to clear chat')));
+      return;
+    }
+
+    setState(() {
+      _messages.clear();
+      _otherUserTyping = false;
+      _deletedForMe.clear();
+      _deletedForEveryone.clear();
+    });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Chat cleared successfully')));
+  }
+
+  Future<void> _deleteChatConversation() async {
+    final chatId = _chatId;
+    if (chatId == null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Chat is not ready yet')));
+      return;
+    }
+
+    final confirmed = await _showChatActionConfirmation(
+      title: 'Delete chat?',
+      content: 'This chat will be removed from your chat list.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed || !mounted) return;
+
+    final deleted = await _chatService.deleteChat(chatId);
+    if (!mounted) return;
+
+    if (!deleted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to delete chat')));
+      return;
+    }
+
+    Navigator.pop(context, {'deletedChatId': chatId});
+  }
+
+  Future<bool> _showChatActionConfirmation({
+    required String title,
+    required String content,
+    required String confirmLabel,
+    bool destructive = false,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(title),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: destructive
+                ? TextButton.styleFrom(foregroundColor: Colors.red)
+                : null,
+            child: Text(confirmLabel),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -694,7 +845,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.pinkAccent,
                 ),
-                child: const Text('Retry', style: TextStyle(color: Colors.white)),
+                child: const Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -730,8 +884,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                   return const SizedBox.shrink();
                 }
 
-                final isDeletedForEveryone =
-                    _deletedForEveryone.contains(message.messageId);
+                final isDeletedForEveryone = _deletedForEveryone.contains(
+                  message.messageId,
+                );
 
                 // Date separator
                 final dateSep = _dateSeparator(msgIndex);
@@ -744,7 +899,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                         child: Center(
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 6),
+                              horizontal: 14,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.grey.shade300.withOpacity(0.6),
                               borderRadius: BorderRadius.circular(12),
@@ -752,7 +909,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             child: Text(
                               dateSep,
                               style: TextStyle(
-                                  fontSize: 12, color: Colors.grey.shade700),
+                                fontSize: 12,
+                                color: Colors.grey.shade700,
+                              ),
                             ),
                           ),
                         ),
@@ -768,17 +927,20 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                         child: Container(
                           margin: const EdgeInsets.symmetric(vertical: 3),
                           constraints: BoxConstraints(
-                            maxWidth:
-                                MediaQuery.of(context).size.width * 0.78,
+                            maxWidth: MediaQuery.of(context).size.width * 0.78,
                           ),
                           padding: const EdgeInsets.only(
-                              left: 14, right: 10, top: 8, bottom: 6),
+                            left: 14,
+                            right: 10,
+                            top: 8,
+                            bottom: 6,
+                          ),
                           decoration: BoxDecoration(
                             color: isDeletedForEveryone
                                 ? Colors.grey.shade200
                                 : (isUser
-                                    ? Colors.pinkAccent
-                                    : const Color(0xFFFFE4EC)),
+                                      ? Colors.pinkAccent
+                                      : const Color(0xFFFFE4EC)),
                             borderRadius: BorderRadius.only(
                               topLeft: const Radius.circular(16),
                               topRight: const Radius.circular(16),
@@ -794,9 +956,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                               ? Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.block,
-                                        size: 14,
-                                        color: Colors.grey.shade600),
+                                    Icon(
+                                      Icons.block,
+                                      size: 14,
+                                      color: Colors.grey.shade600,
+                                    ),
                                     const SizedBox(width: 6),
                                     Text(
                                       'This message was deleted',
@@ -840,12 +1004,16 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                         if (isUser) ...[
                                           const SizedBox(width: 4),
                                           Icon(
-                                            message.messageId
-                                                    .startsWith('temp_')
-                                                ? Icons.access_time // pending
+                                            message.messageId.startsWith(
+                                                  'temp_',
+                                                )
+                                                ? Icons
+                                                      .access_time // pending
                                                 : (message.isRead
-                                                    ? Icons.done_all // read
-                                                    : Icons.done), // delivered
+                                                      ? Icons
+                                                            .done_all // read
+                                                      : Icons
+                                                            .done), // delivered
                                             size: 14,
                                             color: message.isRead
                                                 ? Colors.lightBlueAccent
@@ -867,15 +1035,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
           // Input Area
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 10.0,
+            ),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                    color: Colors.grey.withOpacity(0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, -2))
+                  color: Colors.grey.withOpacity(0.2),
+                  blurRadius: 4,
+                  offset: const Offset(0, -2),
+                ),
               ],
             ),
             child: Row(
@@ -891,7 +1062,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                       filled: true,
                       fillColor: const Color(0xFFFFF1F5),
                       contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 10),
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(30),
                         borderSide: BorderSide.none,
@@ -899,7 +1072,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(30),
                         borderSide: const BorderSide(
-                            color: Colors.pinkAccent, width: 1),
+                          color: Colors.pinkAccent,
+                          width: 1,
+                        ),
                       ),
                     ),
                     onChanged: (text) {
@@ -940,12 +1115,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
             radius: 18,
             backgroundColor: const Color(0xFFFFF1F5),
             backgroundImage: _resolveAvatar(widget.otherUserAvatar),
-            onBackgroundImageError: (widget.otherUserAvatar != null &&
+            onBackgroundImageError:
+                (widget.otherUserAvatar != null &&
                     widget.otherUserAvatar!.isNotEmpty &&
                     widget.otherUserAvatar!.startsWith('http'))
                 ? (_, __) {}
                 : null,
-            child: (widget.otherUserAvatar == null ||
+            child:
+                (widget.otherUserAvatar == null ||
                     widget.otherUserAvatar!.isEmpty)
                 ? const Icon(Icons.person, size: 20, color: Colors.pinkAccent)
                 : null,
@@ -957,7 +1134,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               Text(
                 widget.expertName,
                 style: const TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 16),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
               if (_otherUserTyping)
                 const Text(
@@ -982,8 +1161,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     const SizedBox(width: 4),
                     const Text(
                       'Online',
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.white70),
+                      style: TextStyle(fontSize: 12, color: Colors.white70),
                     ),
                   ],
                 ),
@@ -996,9 +1174,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         onPressed: () => Navigator.pop(context),
       ),
       actions: [
-        IconButton(
+        PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert, color: Colors.white),
-          onPressed: () {},
+          onSelected: (value) => _handleConversationMenuSelection(value),
+          itemBuilder: (context) => const [
+            PopupMenuItem<String>(value: 'clear', child: Text('Clear chat')),
+            PopupMenuItem<String>(value: 'delete', child: Text('Delete chat')),
+          ],
         ),
       ],
     );

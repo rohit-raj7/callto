@@ -68,6 +68,7 @@ flutter:
     - assets/login/img14.jpg
     - assets/login/img15.jpg
     - assets/login/google_logo.png
+    - assets/images/female_profile/avatar1.jpg
     - assets/images/female_profile/avatar2.jpg
     - assets/images/female_profile/avatar3.jpg
     - assets/images/female_profile/avatar4.jpg
@@ -82,6 +83,7 @@ flutter:
     - assets/images/female_profile/avatar13.jpg
     - assets/images/female_profile/avatar14.jpg
     - assets/images/female_profile/avatar15.jpg
+    - assets/images/female_profile/avatar16.jpg
 
     - assets/images/male_profile/avatar1.jpg
     - assets/images/male_profile/avatar2.jpg
