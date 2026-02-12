@@ -104,19 +104,17 @@ class _ProfilePageState extends State<ProfilePage> {
       );
 
       if (result.success) {
-        // Calculate total net earnings (70% of gross after platform fee)
-        double totalGross = 0;
+        // Use backend-calculated listenerEarn (actual payout)
+        double totalEarnings = 0;
         for (final call in result.calls) {
-          if (call.status == 'completed' && call.totalCost != null) {
-            totalGross += call.totalCost!;
+          if (call.status == 'completed' && call.listenerEarn != null) {
+            totalEarnings += call.listenerEarn!;
           }
         }
-        // Net earnings = 70% of gross (30% platform fee deducted)
-        final netEarnings = totalGross * 0.70;
         
         if (mounted) {
           setState(() {
-            _totalEarnings = netEarnings;
+            _totalEarnings = totalEarnings;
           });
         }
       }
