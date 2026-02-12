@@ -9,7 +9,11 @@ import '../../services/listener_service.dart';
 import '../../models/listener_model.dart' as model;
 
 class RandomCallScreen extends StatefulWidget {
-  const RandomCallScreen({super.key});
+  const RandomCallScreen({super.key, this.onBackToHome});
+
+  /// Optional hook used when this screen is shown inside a BottomNavBar tab.
+  /// If provided, pressing back will switch to Home instead of trying to pop.
+  final VoidCallback? onBackToHome;
 
   @override
   State<RandomCallScreen> createState() => _RandomCallScreenState();
@@ -273,7 +277,17 @@ class _RandomCallScreenState extends State<RandomCallScreen>
         matchedUser = null;
       });
     }
-    Navigator.pop(context);
+
+    // If this page was pushed on the Navigator stack, pop it.
+    // Otherwise (e.g. when embedded as a BottomNavBar tab), redirect to Home.
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
+    if (widget.onBackToHome != null) {
+      widget.onBackToHome!();
+    }
   }
 
   @override

@@ -14,12 +14,25 @@ class BottomNavBar extends StatefulWidget {
 class _BottomNavBarState extends State<BottomNavBar> {
   int _currentIndex = 0;
 
-  final List<Widget> _screens = const [
-    HomeScreen(),
-    RandomCallScreen(),
-    ChatScreen(),
-    RecentsScreen(),
-  ];
+  late final List<Widget> _screens;
+
+  void _goHome() {
+    if (!mounted) return;
+    setState(() {
+      _currentIndex = 0;
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _screens = [
+      const HomeScreen(),
+      RandomCallScreen(onBackToHome: _goHome),
+      const ChatScreen(),
+      const RecentsScreen(),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {

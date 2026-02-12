@@ -137,6 +137,296 @@ async function ensureSchema() {
     await pool.query(createAdminsSql);
     console.log('✓ Ensured admins table exists');
 
+    // Create core tables BEFORE any table that references them
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        phone_number VARCHAR(15) UNIQUE,
+        email VARCHAR(255) UNIQUE,
+        password_hash VARCHAR(255),
+        auth_provider VARCHAR(20) DEFAULT 'phone',
+        google_id VARCHAR(255) UNIQUE,
+        facebook_id VARCHAR(255) UNIQUE,
+        full_name VARCHAR(100),
+        display_name VARCHAR(50),
+        gender VARCHAR(10),
+        mobile_number VARCHAR(15),
+        languages TEXT[],
+        date_of_birth DATE,
+        city VARCHAR(100),
+        country VARCHAR(100),
+        avatar_url TEXT,
+        bio TEXT,
+        is_verified BOOLEAN DEFAULT FALSE,
+        is_active BOOLEAN DEFAULT TRUE,
+        wallet_balance DECIMAL(10, 2) DEFAULT 0.0,
+        account_type VARCHAR(20) DEFAULT 'user',
+        is_first_time_user BOOLEAN DEFAULT FALSE,
+        offer_used BOOLEAN DEFAULT FALSE,
+        offer_minutes_limit INTEGER,
+        offer_flat_price DECIMAL(10, 2),
+        fcm_token TEXT,
+        last_seen TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP
+      );
+    `);
+    console.log('✓ Ensured users table exists');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS listeners (
+        listener_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
+        original_name VARCHAR(100),
+        professional_name VARCHAR(100) NOT NULL,
+        age INTEGER,
+        mobile_number VARCHAR(15),
+        specialties TEXT[],
+        experiences TEXT[],
+        languages TEXT[],
+        rate_per_minute DECIMAL(10, 2) NOT NULL,
+        user_rate_per_min DECIMAL(10, 2),
+        listener_payout_per_min DECIMAL(10, 2),
+        currency VARCHAR(3) DEFAULT 'INR',
+        average_rating DECIMAL(3, 2) DEFAULT 0.0,
+        total_ratings INTEGER DEFAULT 0,
+        total_calls INTEGER DEFAULT 0,
+        total_minutes INTEGER DEFAULT 0,
+        total_earning DECIMAL(10, 2) DEFAULT 0.0,
+        is_online BOOLEAN DEFAULT FALSE,
+        wallet_balance DECIMAL(10, 2) DEFAULT 0.0,
+        last_active_at TIMESTAMP,
+        is_available BOOLEAN DEFAULT TRUE,
+        is_active BOOLEAN DEFAULT TRUE,
+        is_busy BOOLEAN DEFAULT FALSE,
+        is_verified BOOLEAN DEFAULT FALSE,
+        verification_status VARCHAR(20) DEFAULT 'pending',
+        voice_verified BOOLEAN DEFAULT FALSE,
+        voice_verification_url TEXT,
+        profile_image TEXT,
+        background_image TEXT,
+        experience_years INTEGER,
+        education TEXT,
+        certifications TEXT[] DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✓ Ensured listeners table exists');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS calls (
+        call_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        caller_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE SET NULL,
+        call_type VARCHAR(20),
+        status VARCHAR(20) DEFAULT 'pending',
+        started_at TIMESTAMP,
+        ended_at TIMESTAMP,
+        duration_seconds INTEGER DEFAULT 0,
+        rate_per_minute DECIMAL(10, 2),
+        total_cost DECIMAL(10, 2) DEFAULT 0.0,
+        billed_minutes INTEGER,
+        offer_applied BOOLEAN DEFAULT FALSE,
+        offer_flat_price DECIMAL(10, 2),
+        offer_minutes_limit INTEGER,
+        is_rated BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✓ Ensured calls table exists');
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        notification_type VARCHAR(50),
+        is_read BOOLEAN DEFAULT FALSE,
+        data JSONB,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, is_read, created_at DESC);
+    `);
+    console.log('✓ Ensured notifications table exists');
+
+    // Create remaining core tables that other parts of the app depend on
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS otp_verification (
+        otp_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        phone_number VARCHAR(15) NOT NULL,
+        otp_code VARCHAR(6) NOT NULL,
+        is_verified BOOLEAN DEFAULT FALSE,
+        expires_at TIMESTAMP NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_otp_phone ON otp_verification(phone_number, is_verified);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS ratings (
+        rating_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        call_id UUID REFERENCES calls(call_id) ON DELETE CASCADE,
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        rating DECIMAL(2, 1) CHECK (rating >= 1.0 AND rating <= 5.0),
+        review_text TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ratings_listener ON ratings(listener_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_ratings_call_id ON ratings(call_id);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS transactions (
+        transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        transaction_type VARCHAR(20) CHECK (transaction_type IN ('credit', 'debit', 'refund', 'withdrawal')),
+        amount DECIMAL(10, 2) NOT NULL,
+        currency VARCHAR(3) DEFAULT 'INR',
+        description TEXT,
+        payment_method VARCHAR(50),
+        payment_gateway_id TEXT,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'refunded')),
+        related_call_id UUID REFERENCES calls(call_id),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_transactions_user ON transactions(user_id, created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS wallets (
+        wallet_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID UNIQUE REFERENCES users(user_id) ON DELETE CASCADE,
+        balance DECIMAL(10, 2) DEFAULT 0.0,
+        currency VARCHAR(3) DEFAULT 'INR',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS listener_payment_details (
+        payment_detail_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        listener_id UUID UNIQUE REFERENCES listeners(listener_id) ON DELETE CASCADE,
+        payment_method VARCHAR(20) CHECK (payment_method IN ('upi', 'bank')),
+        mobile_number VARCHAR(15),
+        upi_id VARCHAR(255),
+        aadhaar_number VARCHAR(12),
+        pan_number VARCHAR(10),
+        name_as_per_pan VARCHAR(100),
+        account_number VARCHAR(20),
+        ifsc_code VARCHAR(11),
+        bank_name VARCHAR(100),
+        account_holder_name VARCHAR(100),
+        pan_aadhaar_bank VARCHAR(20),
+        is_verified BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS chats (
+        chat_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user1_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        user2_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        last_message TEXT,
+        last_message_at TIMESTAMP,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user1_id, user2_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_chats_users ON chats(user1_id, user2_id);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS messages (
+        message_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        chat_id UUID REFERENCES chats(chat_id) ON DELETE CASCADE,
+        sender_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        message_type VARCHAR(20) DEFAULT 'text',
+        message_content TEXT NOT NULL,
+        media_url TEXT,
+        is_read BOOLEAN DEFAULT FALSE,
+        read_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS favorites (
+        favorite_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(user_id, listener_id)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS blocked_users (
+        block_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        blocker_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        blocked_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(blocker_id, blocked_id)
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS reports (
+        report_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        reporter_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        reported_user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        report_type VARCHAR(50),
+        description TEXT,
+        status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved', 'dismissed')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_languages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(user_id) ON DELETE CASCADE,
+        language VARCHAR(50) NOT NULL,
+        proficiency_level VARCHAR(20) CHECK (proficiency_level IN ('Native', 'Fluent', 'Basic')),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS listener_availability (
+        availability_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        listener_id UUID REFERENCES listeners(listener_id) ON DELETE CASCADE,
+        day_of_week INTEGER CHECK (day_of_week >= 0 AND day_of_week <= 6),
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        is_available BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS recharge_packs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        amount DECIMAL(10, 2) NOT NULL,
+        extra_percent_or_amount DECIMAL(10, 2) DEFAULT 0.0,
+        badge_text VARCHAR(50),
+        is_active BOOLEAN DEFAULT TRUE,
+        sort_order INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_recharge_packs_sort_order ON recharge_packs(sort_order);
+    `);
+
+    console.log('✓ Ensured all remaining core tables exist');
+
     const createOutboxSql = `
       CREATE TABLE IF NOT EXISTS notification_outbox (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
