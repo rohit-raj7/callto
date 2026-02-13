@@ -1,22 +1,20 @@
-
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ApiConfig {
-//   static final String baseUrl = kDebugMode
-//       ? (kIsWeb 
-//           ? 'http://localhost:3002' 
-//           : (defaultTargetPlatform == TargetPlatform.android 
-//               ? 'http://10.0.2.2:3002' 
-//               : 'http://localhost:3002')t)
-//       : 'https://callto-4.onrender.com';
-// 
+  //   static final String baseUrl = kDebugMode
+  //       ? (kIsWeb
+  //           ? 'http://localhost:3002'
+  //           : (defaultTargetPlatform == TargetPlatform.android
+  //               ? 'http://10.0.2.2:3002'
+  //               : 'http://localhost:3002')t)
+  //       : 'https://callto-4.onrender.com';
+  //
   static final String baseUrl =
       dotenv.env['API_BASE_URL']?.trim().isNotEmpty == true
-          ? dotenv.env['API_BASE_URL']!.trim()
-          : 'https://call1.onrender.com';
+      ? dotenv.env['API_BASE_URL']!.trim()
+      : 'https://call1.onrender.com';
 
   // static final String baseUrl ='http://localhost:3002';
-      
 
   static final String socketUrl = baseUrl;
 
@@ -42,12 +40,15 @@ class ApiConfig {
   static final String agoraToken = '$apiBase/calls/agora/token';
   static final String callRates = '$apiBase/config/call-rates';
   static final String submitRating = '$apiBase/ratings/submit';
+  static final String submitAppRating = '$apiBase/app-ratings';
 
   static final String chats = '$apiBase/chats';
   static final String contactMessages = '$apiBase/contacts';
   static final String notificationsMy = '$apiBase/notifications/my';
-  static final String notificationsMarkRead = '$apiBase/notifications/mark-read';
-  static final String notificationsUnreadCount = '$apiBase/notifications/unread-count';
+  static final String notificationsMarkRead =
+      '$apiBase/notifications/mark-read';
+  static final String notificationsUnreadCount =
+      '$apiBase/notifications/unread-count';
 
   static final String health = '$apiBase/health';
 

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'profile/contact.dart';
 import 'profile/my_transaction.dart';
-import 'profile/wallet.dart'; 
-import '../screens/recents_screen.dart';
+import 'profile/wallet.dart';
+import 'profile/rating.dart';
 import 'profile/setting.dart';
 import 'profile/language.dart';
 import '../../services/storage_service.dart';
@@ -19,6 +20,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   final StorageService _storageService = StorageService();
   final UserService _userService = UserService();
+  static const String _shareAppLink = 'https://callto.app';
   String? displayName;
   String? city;
   String? avatarUrl;
@@ -136,7 +138,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final newAvatarUrl = avatarImages[_selectedAvatarIndex!];
     final newDob = _dobController.text;
     final newMobile = _mobileController.text.trim();
-    
+
     // Validate mobile number if provided (must be 10 digits)
     if (newMobile.isNotEmpty && newMobile.length != 10) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -200,6 +202,18 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _shareApp() async {
+    const message = 'Check out Callto app:\n$_shareAppLink';
+    try {
+      await Share.share(message, subject: 'Callto App');
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to share app link right now')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -224,7 +238,7 @@ class _ProfilePageState extends State<ProfilePage> {
           },
         ),
 
-        // // 💰 Wallet Balance 
+        // // 💰 Wallet Balance
         actions: !_isEditMode
             ? [
                 Padding(
@@ -303,8 +317,8 @@ class _ProfilePageState extends State<ProfilePage> {
               child: const ProfileCardSkeleton(),
             )
           : _isEditMode
-              ? _buildEditMode()
-              : _buildViewMode(),
+          ? _buildEditMode()
+          : _buildViewMode(),
     );
   }
 
@@ -335,7 +349,10 @@ class _ProfilePageState extends State<ProfilePage> {
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFFF5C8A), width: 3),
+                    border: Border.all(
+                      color: const Color(0xFFFF5C8A),
+                      width: 3,
+                    ),
                     boxShadow: [
                       BoxShadow(
                         color: const Color(0xFFFF5C8A).withOpacity(0.3),
@@ -392,7 +409,11 @@ class _ProfilePageState extends State<ProfilePage> {
                           padding: const EdgeInsets.only(top: 4.0),
                           child: Row(
                             children: [
-                              const Icon(Icons.phone, size: 12, color: Colors.grey),
+                              const Icon(
+                                Icons.phone,
+                                size: 12,
+                                color: Colors.grey,
+                              ),
                               const SizedBox(width: 4),
                               Text(
                                 mobileNumber!,
@@ -472,8 +493,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                 await Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (context) =>
-                                        const WalletScreen(),
+                                    builder: (context) => const WalletScreen(),
                                   ),
                                 );
                                 // Reload wallet balance when returning
@@ -527,16 +547,6 @@ class _ProfilePageState extends State<ProfilePage> {
 
           // --- Options List ---
           _buildListTile(
-            Icons.history,
-            "Recents",
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const RecentsScreen()),
-              );
-            },
-          ),
-           _buildListTile(
             Icons.swap_horiz,
             "My Wallet",
             onTap: () async {
@@ -554,7 +564,9 @@ class _ProfilePageState extends State<ProfilePage> {
             onTap: () async {
               await Navigator.push(
                 context,
-                MaterialPageRoute(builder: (context) => const TransactionScreen()),
+                MaterialPageRoute(
+                  builder: (context) => const TransactionScreen(),
+                ),
               );
               // Reload wallet balance when returning
               _loadUserData();
@@ -592,6 +604,47 @@ class _ProfilePageState extends State<ProfilePage> {
                 MaterialPageRoute(builder: (context) => const ContactUsPage()),
               );
             },
+          ),
+          _buildListTile(
+            Icons.share,
+            "Share App",
+            onTap: () {
+              _shareApp();
+            },
+          ),
+
+          const SizedBox(height: 10),
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 240),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AppRatingPage(),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:const Color(0xFFFF5C8A),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.star_rate_rounded, size: 20),
+                  label: const Text(
+                    'Rate Us',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),

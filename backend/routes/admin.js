@@ -4,6 +4,7 @@ import axios from 'axios';
 import { OAuth2Client } from 'google-auth-library';
 import Admin from '../models/Admin.js';
 import Listener from '../models/Listener.js';
+import AppRating from '../models/AppRating.js';
 import ChatChargeConfig from '../models/ChatChargeConfig.js';
 import config from '../config/config.js';
 import { pool, getRateConfig } from '../db.js';
@@ -383,6 +384,86 @@ router.put('/listener/update-rates/:listenerId', authenticateAdmin, async (req, 
   } catch (error) {
     console.error('Update listener rates error:', error);
     res.status(500).json({ error: 'Failed to update listener rates' });
+  }
+});
+
+// GET /api/admin/app-ratings
+// Fetch app ratings and feedback for admin panel
+router.get('/app-ratings', authenticateAdmin, async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, min_rating, max_rating } = req.query;
+    const perPage = Math.min(Math.max(Number(limit) || 20, 1), 200);
+    const currentPage = Math.max(Number(page) || 1, 1);
+    const offset = (currentPage - 1) * perPage;
+
+    const minRating = min_rating !== undefined ? Number(min_rating) : undefined;
+    const maxRating = max_rating !== undefined ? Number(max_rating) : undefined;
+
+    if (min_rating !== undefined && !Number.isFinite(minRating)) {
+      return res.status(400).json({ error: 'min_rating must be a valid number' });
+    }
+
+    if (max_rating !== undefined && !Number.isFinite(maxRating)) {
+      return res.status(400).json({ error: 'max_rating must be a valid number' });
+    }
+
+    if (
+      Number.isFinite(minRating) &&
+      Number.isFinite(maxRating) &&
+      Number(minRating) > Number(maxRating)
+    ) {
+      return res.status(400).json({ error: 'min_rating cannot be greater than max_rating' });
+    }
+
+    const result = await AppRating.getAllForAdmin({
+      limit: perPage,
+      offset,
+      search,
+      minRating,
+      maxRating,
+    });
+
+    return res.json({
+      ratings: result.ratings,
+      count: result.count,
+      average_rating: result.average_rating,
+      page: currentPage,
+      limit: perPage,
+    });
+  } catch (error) {
+    console.error('Get app ratings error:', error);
+    return res.status(500).json({ error: 'Failed to fetch app ratings' });
+  }
+});
+
+// DELETE /api/admin/app-ratings
+// Delete selected app ratings for admin panel
+router.delete('/app-ratings', authenticateAdmin, async (req, res) => {
+  try {
+    const bodyIds = req.body?.rating_ids ?? req.body?.ratingIds;
+    const ratingIds = Array.isArray(bodyIds) ? bodyIds : [];
+    const normalizedIds = Array.from(
+      new Set(
+        ratingIds
+          .map((value) => String(value || '').trim())
+          .filter((value) => value.length > 0),
+      ),
+    );
+
+    if (normalizedIds.length === 0) {
+      return res.status(400).json({ error: 'rating_ids must be a non-empty array of rating IDs' });
+    }
+
+    const result = await AppRating.deleteByIds(normalizedIds);
+
+    return res.json({
+      message: `Deleted ${result.deleted_count} rating${result.deleted_count === 1 ? '' : 's'}`,
+      deleted_count: result.deleted_count,
+      deleted_ids: result.deleted_ids,
+    });
+  } catch (error) {
+    console.error('Delete app ratings error:', error);
+    return res.status(500).json({ error: 'Failed to delete app ratings' });
   }
 });
 

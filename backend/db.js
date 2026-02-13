@@ -280,6 +280,39 @@ async function ensureSchema() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_ratings (
+        app_rating_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+        rating DECIMAL(2, 1) NOT NULL CHECK (rating >= 1.0 AND rating <= 5.0),
+        feedback TEXT,
+        source VARCHAR(30) DEFAULT 'mobile',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      ALTER TABLE app_ratings
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+
+      -- Keep only the latest row per user before enforcing uniqueness
+      DELETE FROM app_ratings older
+      USING app_ratings newer
+      WHERE older.user_id IS NOT NULL
+        AND older.user_id = newer.user_id
+        AND (
+          older.created_at < newer.created_at
+          OR (
+            older.created_at = newer.created_at
+            AND older.app_rating_id::text < newer.app_rating_id::text
+          )
+        );
+
+      CREATE INDEX IF NOT EXISTS idx_app_ratings_created ON app_ratings(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_app_ratings_user ON app_ratings(user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_app_ratings_user_unique
+      ON app_ratings(user_id)
+      WHERE user_id IS NOT NULL;
+    `);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS transactions (
         transaction_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,

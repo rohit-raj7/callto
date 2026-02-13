@@ -165,49 +165,7 @@ class _TopBarState extends State<TopBar> {
             ),
 
             const SizedBox(height: 12),
-
-            // 🔔 Promotion Banner
-          //   Container(
-          //     decoration: BoxDecoration(
-          //       borderRadius: BorderRadius.circular(16),
-          //       gradient: const LinearGradient(
-          //         colors: [Colors.purpleAccent, Colors.redAccent],
-          //       ),
-          //     ),
-          //     padding:
-          //         const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-          //     child: Row(
-          //       children: const [
-          //         Expanded(
-          //           child: Text.rich(
-          //             TextSpan(
-          //               children: [
-          //                 TextSpan(
-          //                   text: "Now text your ",
-          //                   style: TextStyle(color: Colors.white),
-          //                 ),
-          //                 TextSpan(
-          //                   text: "Favourite Experts ",
-          //                   style: TextStyle(
-          //                     color: Colors.yellow,
-          //                     fontWeight: FontWeight.bold,
-          //                   ),
-          //                 ),
-          //                 TextSpan(
-          //                   text: "@ ₹5/min only!",
-          //                   style: TextStyle(color: Colors.white),
-          //                 ),
-          //               ],
-          //             ),
-          //             overflow: TextOverflow.ellipsis,
-          //           ),
-          //         ),
-          //         Icon(Icons.shuffle, color: Colors.white),
-          //       ],
-          //     ),
-          //   ),
-          // ],
-
+ 
           // 🔔 Promotion Banner
             Container(
               decoration: BoxDecoration(
@@ -252,7 +210,7 @@ class _TopBarState extends State<TopBar> {
                             ),
                           ),
                           TextSpan(
-                            text: "@ ₹5/min only!",
+                            text: "@ ₹4/min only!",
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 13.5,
@@ -267,6 +225,9 @@ class _TopBarState extends State<TopBar> {
                 ],
               ),
             ),
+
+           
+// ----------------------------
           ],
         ),
       ),

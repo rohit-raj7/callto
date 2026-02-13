@@ -185,6 +185,34 @@ class UserService {
     }
   }
 
+  /// Submit app rating and feedback
+  Future<ActionResult> submitAppRating({
+    required double rating,
+    String? feedback,
+  }) async {
+    final response = await _api.post(
+      ApiConfig.submitAppRating,
+      body: {
+        'rating': rating,
+        if (feedback != null && feedback.trim().isNotEmpty)
+          'feedback': feedback.trim(),
+      },
+    );
+
+    if (response.isSuccess) {
+      return ActionResult(
+        success: true,
+        message:
+            response.data['message']?.toString() ?? 'Thanks for your feedback!',
+      );
+    }
+
+    return ActionResult(
+      success: false,
+      error: response.error ?? 'Failed to submit app rating',
+    );
+  }
+
   /// Block another user
   Future<ActionResult> blockUser(String blockedUserId, {String? reason}) async {
     final response = await _api.post(
@@ -218,7 +246,8 @@ class UserService {
       return ActionResult(
         success: true,
         message:
-            response.data['message']?.toString() ?? 'User unblocked successfully',
+            response.data['message']?.toString() ??
+            'User unblocked successfully',
       );
     }
 

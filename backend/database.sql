@@ -283,6 +283,25 @@ CREATE INDEX idx_ratings_listener ON ratings(listener_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ratings_call_id ON ratings(call_id);
 
 -- ============================================
+-- APP RATINGS & FEEDBACK TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS app_ratings (
+    app_rating_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    rating DECIMAL(2, 1) NOT NULL CHECK (rating >= 1.0 AND rating <= 5.0),
+    feedback TEXT,
+    source VARCHAR(30) DEFAULT 'mobile',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_ratings_created ON app_ratings(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_ratings_user ON app_ratings(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_ratings_user_unique
+ON app_ratings(user_id)
+WHERE user_id IS NOT NULL;
+
+-- ============================================
 -- TRANSACTIONS/WALLET TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS transactions (

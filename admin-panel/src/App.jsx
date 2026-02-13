@@ -11,6 +11,7 @@ import UsersManagement from './pages/UsersManagement';
 import UserContactInfo from './pages/UserContactInfo';
 import ContactMessages from './pages/ContactMessages';
 import DeleteRequests from './pages/DeleteRequests';
+import AppRatings from './pages/AppRatings';
 import ListenersManagement from './pages/ListenersManagement';
 import ListenerDetails from './pages/ListenerDetails';
 import ListenerProfile from './pages/ListenerProfile';
@@ -142,6 +143,15 @@ function App() {
                   <PrivateRoute>
                     <Layout>
                       <ContactMessages />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/app-ratings" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <AppRatings />
                     </Layout>
                   </PrivateRoute>
                 </ThemeProvider>

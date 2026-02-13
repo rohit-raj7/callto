@@ -79,6 +79,9 @@ export const deleteListener = (listener_id) => api.delete(`/listeners/${listener
 
 // Admin methods
 export const getAdminListeners = () => api.get('/admin/listeners');
+export const getAppRatings = (params = {}) => api.get('/admin/app-ratings', { params });
+export const deleteAppRatings = (ratingIds = []) =>
+  api.delete('/admin/app-ratings', { data: { rating_ids: ratingIds } });
 export const getContactMessages = (params = {}) => api.get('/admin/contact-messages', { params });
 export const getDeleteRequests = (params = {}) => api.get('/admin/delete-requests', { params });
 export const deleteDeleteRequest = (request_id) => api.delete(`/admin/delete-requests/${request_id}`);

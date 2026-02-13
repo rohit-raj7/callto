@@ -29,6 +29,7 @@ import notificationsRoutes from './routes/notifications.js';
 import accountRoutes from './routes/account.js';
 import paymentRoutes from './routes/payments.js';
 import ratingRoutes from './routes/ratings.js';
+import appRatingRoutes from './routes/appRatings.js';
 import rechargePackRoutes from './routes/rechargePacks.js';
 import User from './models/User.js';
 import Listener from './models/Listener.js'; // Import for verification checks
@@ -141,6 +142,7 @@ app.use('/api/notifications', notificationsRoutes);
 app.use('/api/account', accountRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/ratings', ratingRoutes);
+app.use('/api/app-ratings', appRatingRoutes);
 app.use('/api/recharge-packs', rechargePackRoutes);
 
 // ============================================
