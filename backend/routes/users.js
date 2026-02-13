@@ -155,8 +155,9 @@ router.get('/offer-banner', authenticate, async (req, res) => {
       [req.userId]
     );
 
-    const [walletResult, offerResult, debugResult] = await Promise.all([
+    const [walletResult, activeNonExpiredResult, activeAnyResult] = await Promise.all([
       pool.query('SELECT balance FROM wallets WHERE user_id = $1 LIMIT 1', [req.userId]),
+      // 1) Try to find an active, non-expired banner
       pool.query(
         `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
                 recharge_amount, discounted_amount, min_wallet_balance,
@@ -168,44 +169,55 @@ router.get('/offer-banner', authenticate, async (req, res) => {
          ORDER BY updated_at DESC
          LIMIT 1`
       ),
+      // 2) Also fetch any active banner (even if expired) for auto-extend
       pool.query(
-        `SELECT config_id, is_active, starts_at, expires_at, updated_at
+        `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
+                recharge_amount, discounted_amount, min_wallet_balance,
+                starts_at, expires_at, is_active, updated_at
          FROM offer_banner_config
+         WHERE is_active = TRUE
          ORDER BY updated_at DESC
-         LIMIT 3`
+         LIMIT 1`
       ),
     ]);
 
     const walletBalance = Number(walletResult.rows[0]?.balance ?? 0);
-    const activeBanner = offerResult.rows[0];
+    let activeBanner = activeNonExpiredResult.rows[0];
 
-    // Debug logging to help diagnose banner visibility issues
-    console.log('[offer-banner] userId:', req.userId, '| walletBalance:', walletBalance,
-      '| activeBannerFound:', Boolean(activeBanner),
-      '| totalConfigRows:', debugResult.rows.length);
-    if (debugResult.rows.length > 0) {
-      debugResult.rows.forEach((r, i) => {
-        console.log(`[offer-banner]   row[${i}]: is_active=${r.is_active}, expires_at=${r.expires_at}, starts_at=${r.starts_at}`);
-      });
+    // Auto-extend: if there's an active banner but it's expired, extend it by 7 days
+    if (!activeBanner && activeAnyResult.rows[0]) {
+      const expiredBanner = activeAnyResult.rows[0];
+      const newStartsAt = new Date();
+      const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      console.log('[offer-banner] Auto-extending expired active banner:', expiredBanner.config_id,
+        'old expires_at:', expiredBanner.expires_at, '-> new expires_at:', newExpiresAt);
+
+      const updated = await pool.query(
+        `UPDATE offer_banner_config
+         SET starts_at = $1, expires_at = $2, updated_at = CURRENT_TIMESTAMP
+         WHERE config_id = $3
+         RETURNING config_id, title, headline, subtext, button_text, countdown_prefix,
+                   recharge_amount, discounted_amount, min_wallet_balance,
+                   starts_at, expires_at, is_active, updated_at`,
+        [newStartsAt, newExpiresAt, expiredBanner.config_id]
+      );
+      activeBanner = updated.rows[0] || null;
     }
 
+    console.log('[offer-banner] userId:', req.userId, '| walletBalance:', walletBalance,
+      '| activeBannerFound:', Boolean(activeBanner));
+
     if (!activeBanner) {
-      const reason = debugResult.rows.length === 0
-        ? 'no_config_rows'
-        : debugResult.rows.some(r => r.is_active)
-          ? 'active_but_expired_or_not_started'
-          : 'none_active';
-      console.log('[offer-banner] Returning activeOffer=false, reason:', reason);
       return res.json({
         activeOffer: false,
         walletBalance,
-        reason,
+        reason: 'none_active',
       });
     }
 
     const minWalletBalance = 5;
     if (walletBalance >= minWalletBalance) {
-      console.log('[offer-banner] Returning activeOffer=false, reason: wallet_sufficient', walletBalance, '>=', minWalletBalance);
       return res.json({
         activeOffer: false,
         walletBalance,
