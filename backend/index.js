@@ -64,13 +64,25 @@ if (config.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Rate limiting
+// Rate limiting — general (generous for mobile retries & socket reconnects)
 const limiter = rateLimit({
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.max,
-  message: 'Too many requests from this IP, please try again later.'
+  standardHeaders: true,  // Send RateLimit-* headers so clients know remaining quota
+  legacyHeaders: false,   // Disable X-RateLimit-* (deprecated)
+  message: { error: 'Too many requests from this IP, please try again later.' }
 });
 app.use('/api/', limiter);
+
+// Stricter rate limit for auth endpoints (login, OTP, register)
+const authLimiter = rateLimit({
+  windowMs: config.authRateLimit.windowMs,
+  max: config.authRateLimit.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Please try again after some time.' }
+});
+app.use('/api/auth/', authLimiter);
 
 // ============================================
 // ROUTES
