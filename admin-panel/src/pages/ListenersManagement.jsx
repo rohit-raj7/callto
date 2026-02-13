@@ -162,7 +162,7 @@ const ListenersManagement = () => {
     }
 
     if (filterVerified !== '') {
-      if (['approved', 'pending', 'rejected'].includes(filterVerified)) {
+      if (['approved', 'pending', 'rejected', 'reapplied'].includes(filterVerified)) {
         data = data.filter(l => (l.verification_status || 'pending') === filterVerified);
       } else {
         data = data.filter(l => l.is_verified === (filterVerified === 'true'));
@@ -446,6 +446,7 @@ const ListenersManagement = () => {
                   <option value="approved">Approved</option>
                   <option value="pending">Pending</option>
                   <option value="rejected">Rejected</option>
+                  <option value="reapplied">Reapplied</option>
                 </select>
               </div>
               <div>
@@ -687,6 +688,12 @@ const ListenersManagement = () => {
                                 Rejected
                               </span>
                             );
+                            if (vs === 'reapplied') return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                                <RefreshCw className="w-3 h-3" />
+                                Reapplied
+                              </span>
+                            );
                             return (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400">
                                 <AlertCircle className="w-3 h-3" />
@@ -893,6 +900,12 @@ const ListenersManagement = () => {
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
                         <XCircle className="w-3 h-3" />
                         Rejected
+                      </span>
+                    );
+                    if (vs === 'reapplied') return (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400">
+                        <RefreshCw className="w-3 h-3" />
+                        Reapplied
                       </span>
                     );
                     return (

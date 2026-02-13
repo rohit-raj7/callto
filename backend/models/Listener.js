@@ -375,6 +375,8 @@ class Listener {
         l.is_available,
         l.is_verified,
         l.verification_status,
+        l.rejection_reason,
+        l.reapply_attempts,
         l.total_earning,
         l.wallet_balance,
         l.is_active,
@@ -433,6 +435,8 @@ class Listener {
         is_available: row.is_available,
         is_verified: row.is_verified,
         verification_status: row.verification_status,
+        rejection_reason: row.rejection_reason,
+        reapply_attempts: row.reapply_attempts || 0,
         total_earning: row.total_earning,
         wallet_balance: row.wallet_balance,
         is_active: row.is_active,
@@ -573,14 +577,14 @@ class Listener {
   }
 
   // Update voice verification status
-  static async updateVoiceVerification(listener_id, voice_url) {
+  static async updateVoiceVerification(listener_id, voice_url, { verified = true } = {}) {
     const query = `
       UPDATE listeners 
-      SET voice_verified = TRUE, voice_verification_url = $1, updated_at = CURRENT_TIMESTAMP
-      WHERE listener_id = $2
+      SET voice_verified = $1, voice_verification_url = $2, updated_at = CURRENT_TIMESTAMP
+      WHERE listener_id = $3
       RETURNING listener_id, voice_verified, voice_verification_url
     `;
-    const result = await pool.query(query, [voice_url, listener_id]);
+    const result = await pool.query(query, [verified, voice_url, listener_id]);
     return result.rows[0];
   }
 
@@ -679,25 +683,67 @@ class Listener {
 
   // Update listener verification status (admin only)
   // VERIFICATION CONTROL: This method allows admin to approve/reject listeners
-  static async updateVerificationStatus(listener_id, status) {
+  static async updateVerificationStatus(listener_id, status, rejection_reason = null) {
     const validStatuses = ['pending', 'approved', 'rejected'];
     if (!validStatuses.includes(status)) {
       throw new Error(`Invalid verification status. Must be one of: ${validStatuses.join(', ')}`);
     }
 
+    // Keep is_verified in sync: true if approved, false otherwise
+    const isVerified = status === 'approved';
+
+    // If rejecting, store the reason. If approving/pending, clear the reason.
+    const reason = status === 'rejected' ? (rejection_reason || null) : null;
+
     const query = `
       UPDATE listeners 
       SET verification_status = $1, 
           is_verified = $2,
+          rejection_reason = $3,
           updated_at = CURRENT_TIMESTAMP
-      WHERE listener_id = $3
-      RETURNING listener_id, verification_status, is_verified
+      WHERE listener_id = $4
+      RETURNING listener_id, verification_status, is_verified, rejection_reason, reapply_attempts
     `;
     
-    // Keep is_verified in sync: true if approved, false otherwise
-    const isVerified = status === 'approved';
+    const result = await pool.query(query, [status, isVerified, reason, listener_id]);
+    return result.rows[0];
+  }
+
+  // Reapply for verification (listener requests re-review after rejection)
+  static async reapplyForVerification(listener_id) {
+    // Check current status and attempts
+    const checkQuery = `
+      SELECT verification_status, reapply_attempts 
+      FROM listeners WHERE listener_id = $1
+    `;
+    const checkResult = await pool.query(checkQuery, [listener_id]);
     
-    const result = await pool.query(query, [status, isVerified, listener_id]);
+    if (checkResult.rows.length === 0) {
+      throw new Error('Listener not found');
+    }
+    
+    const { verification_status, reapply_attempts } = checkResult.rows[0];
+    
+    if (verification_status !== 'rejected') {
+      throw new Error('Can only reapply when status is rejected');
+    }
+    
+    const MAX_REAPPLY_ATTEMPTS = 3;
+    if (reapply_attempts >= MAX_REAPPLY_ATTEMPTS) {
+      throw new Error(`Maximum reapply attempts (${MAX_REAPPLY_ATTEMPTS}) reached. Please contact support.`);
+    }
+
+    const query = `
+      UPDATE listeners 
+      SET verification_status = 'reapplied',
+          reapply_attempts = reapply_attempts + 1,
+          rejection_reason = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE listener_id = $1
+      RETURNING listener_id, verification_status, is_verified, rejection_reason, reapply_attempts
+    `;
+    
+    const result = await pool.query(query, [listener_id]);
     return result.rows[0];
   }
 

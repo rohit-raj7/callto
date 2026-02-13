@@ -24,6 +24,9 @@ class Listener {
   final String? mobileNumber;
   final DateTime? createdAt;
   final Map<String, dynamic>? paymentInfo;
+  final String? verificationStatus;
+  final String? rejectionReason;
+  final int reapplyAttempts;
 
   Listener({
     required this.listenerId,
@@ -50,6 +53,9 @@ class Listener {
     this.mobileNumber,
     this.createdAt,
     this.paymentInfo,
+    this.verificationStatus,
+    this.rejectionReason,
+    this.reapplyAttempts = 0,
   });
 
   factory Listener.fromJson(Map<String, dynamic> json) {
@@ -89,6 +95,9 @@ class Listener {
           ? DateTime.tryParse(json['created_at']) 
           : null,
       paymentInfo: json['payment_info'] is Map ? Map<String, dynamic>.from(json['payment_info']) : null,
+      verificationStatus: json['verification_status'],
+      rejectionReason: json['rejection_reason'],
+      reapplyAttempts: json['reapply_attempts'] ?? 0,
     );
   }
 
@@ -134,6 +143,9 @@ class Listener {
       'mobile_number': mobileNumber,
       'created_at': createdAt?.toIso8601String(),
       'payment_info': paymentInfo,
+      'verification_status': verificationStatus,
+      'rejection_reason': rejectionReason,
+      'reapply_attempts': reapplyAttempts,
     };
   }
 

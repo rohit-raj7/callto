@@ -542,9 +542,9 @@ router.delete('/delete-requests/:request_id', authenticateAdmin, async (req, res
 router.put('/listeners/:listener_id/verification-status', authenticateAdmin, async (req, res) => {
   try {
     const { listener_id } = req.params;
-    const { status } = req.body;
+    const { status, rejection_reason } = req.body;
 
-    console.log(`[ADMIN] Updating verification status for listener ${listener_id} to: ${status}`);
+    console.log(`[ADMIN] Updating verification status for listener ${listener_id} to: ${status}${rejection_reason ? ` (reason: ${rejection_reason})` : ''}`);
 
     if (!status || !['pending', 'approved', 'rejected'].includes(status)) {
       return res.status(400).json({ 
@@ -558,8 +558,8 @@ router.put('/listeners/:listener_id/verification-status', authenticateAdmin, asy
       return res.status(404).json({ error: 'Listener not found' });
     }
 
-    // Update verification status
-    const updated = await Listener.updateVerificationStatus(listener_id, status);
+    // Update verification status with optional rejection reason
+    const updated = await Listener.updateVerificationStatus(listener_id, status, rejection_reason);
 
     console.log(`[ADMIN] Listener ${listener_id} verification status updated to: ${status}`);
 
@@ -568,7 +568,9 @@ router.put('/listeners/:listener_id/verification-status', authenticateAdmin, asy
       listener: {
         listener_id: updated.listener_id,
         verification_status: updated.verification_status,
-        is_verified: updated.is_verified
+        is_verified: updated.is_verified,
+        rejection_reason: updated.rejection_reason,
+        reapply_attempts: updated.reapply_attempts
       }
     });
   } catch (error) {

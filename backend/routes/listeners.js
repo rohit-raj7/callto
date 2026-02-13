@@ -549,6 +549,42 @@ router.get('/me/profile', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
+// POST /api/listeners/me/reapply
+// Reapply for verification after rejection (max 3 attempts)
+router.post('/me/reapply', authenticate, async (req, res) => {
+  try {
+    const listener = await Listener.findByUserId(req.userId);
+
+    if (!listener) {
+      return res.status(404).json({ error: 'Listener profile not found' });
+    }
+
+    const result = await Listener.reapplyForVerification(listener.listener_id);
+
+    console.log(`[LISTENER] Listener ${listener.listener_id} reapplied for verification (attempt ${result.reapply_attempts})`);
+
+    res.json({
+      message: 'Reapplication submitted successfully. Your profile will be reviewed again.',
+      listener: {
+        listener_id: result.listener_id,
+        verification_status: result.verification_status,
+        reapply_attempts: result.reapply_attempts
+      }
+    });
+  } catch (error) {
+    console.error('Reapply for verification error:', error);
+    
+    // Return specific error messages
+    if (error.message.includes('Can only reapply')) {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message.includes('Maximum reapply')) {
+      return res.status(400).json({ error: error.message });
+    }
+    
+    res.status(500).json({ error: 'Failed to submit reapplication' });
+  }
+});
 
 // PUT /api/listeners/me/payment-details
 // Update payment details for current listener
@@ -786,7 +822,9 @@ router.put('/:listener_id/voice-verification', authenticate, async (req, res) =>
       return res.status(403).json({ error: 'Forbidden' });
     }
 
-    const result = await Listener.updateVoiceVerification(req.params.listener_id, finalVoiceUrl);
+    // If listener is rejected, mark as pending review (not auto-verified)
+    const isRejected = listener.verification_status === 'rejected';
+    const result = await Listener.updateVoiceVerification(req.params.listener_id, finalVoiceUrl, { verified: !isRejected });
 
     res.json({
       message: 'Voice verification updated successfully',

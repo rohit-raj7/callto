@@ -20,6 +20,11 @@ const ListenerDetails = () => {
   const [updatingVerification, setUpdatingVerification] = useState(false);
   const [verificationSuccess, setVerificationSuccess] = useState(false);
 
+  // Rejection modal state
+  const [showRejectModal, setShowRejectModal] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [customRejectionReason, setCustomRejectionReason] = useState('');
+
   // Voice player state
   const [isVoicePlaying, setIsVoicePlaying] = useState(false);
   const [voiceProgress, setVoiceProgress] = useState(0);
@@ -115,9 +120,27 @@ const ListenerDetails = () => {
     }
   };
 
+  const REJECTION_REASONS = [
+    'Wrong PAN/Aadhaar details',
+    'Voice not verified',
+    'Payment method not correct',
+    'Mobile number not added',
+    'Profile details incomplete',
+    'Inappropriate content',
+    'Other',
+  ];
+
   const handleVerificationStatusChange = async (newStatus) => {
     if (!['approved', 'rejected', 'pending'].includes(newStatus)) {
       console.error('Invalid verification status:', newStatus);
+      return;
+    }
+
+    // If rejecting, show modal instead of directly updating
+    if (newStatus === 'rejected') {
+      setRejectionReason('');
+      setCustomRejectionReason('');
+      setShowRejectModal(true);
       return;
     }
 
@@ -131,7 +154,8 @@ const ListenerDetails = () => {
       setListener(prev => ({
         ...prev,
         verification_status: newStatus,
-        is_verified: newStatus === 'approved'
+        is_verified: newStatus === 'approved',
+        rejection_reason: null
       }));
 
       // Show success message
@@ -140,6 +164,37 @@ const ListenerDetails = () => {
     } catch (error) {
       console.error('Failed to update verification status:', error);
       setError('Failed to update verification status. Please try again.');
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setUpdatingVerification(false);
+    }
+  };
+
+  const handleConfirmReject = async () => {
+    const reason = rejectionReason === 'Other' ? customRejectionReason : rejectionReason;
+    if (!reason || reason.trim() === '') {
+      return; // Don't allow empty reason
+    }
+
+    setShowRejectModal(false);
+    setUpdatingVerification(true);
+    setVerificationSuccess(false);
+
+    try {
+      await updateListenerVerificationStatus(listener_id, 'rejected', reason.trim());
+      
+      setListener(prev => ({
+        ...prev,
+        verification_status: 'rejected',
+        is_verified: false,
+        rejection_reason: reason.trim()
+      }));
+
+      setVerificationSuccess(true);
+      setTimeout(() => setVerificationSuccess(false), 3000);
+    } catch (error) {
+      console.error('Failed to reject listener:', error);
+      setError('Failed to reject listener. Please try again.');
       setTimeout(() => setError(null), 5000);
     } finally {
       setUpdatingVerification(false);
@@ -402,6 +457,24 @@ const ListenerDetails = () => {
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 rounded-lg text-sm font-medium">
                     <Shield className="w-4 h-4" />
                     Verified
+                  </div>
+                )}
+                {(listener.verification_status === 'reapplied') && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 rounded-lg text-sm font-medium">
+                    <RotateCcw className="w-4 h-4" />
+                    Reapplied
+                  </div>
+                )}
+                {(listener.verification_status === 'rejected') && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm font-medium">
+                    <XCircle className="w-4 h-4" />
+                    Rejected
+                  </div>
+                )}
+                {(listener.verification_status === 'pending') && (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 rounded-lg text-sm font-medium">
+                    <AlertCircle className="w-4 h-4" />
+                    Pending
                   </div>
                 )}
                 {listener.is_available && (
@@ -847,10 +920,12 @@ const ListenerDetails = () => {
               <div className="mb-5 p-4 rounded-xl border-2" style={{
                 borderColor: 
                   (listener.verification_status || 'pending') === 'approved' ? '#10b981' :
-                  (listener.verification_status || 'pending') === 'rejected' ? '#ef4444' : '#f59e0b',
+                  (listener.verification_status || 'pending') === 'rejected' ? '#ef4444' :
+                  (listener.verification_status || 'pending') === 'reapplied' ? '#f97316' : '#f59e0b',
                 backgroundColor: 
                   (listener.verification_status || 'pending') === 'approved' ? '#ecfdf5' :
-                  (listener.verification_status || 'pending') === 'rejected' ? '#fef2f2' : '#fffbeb'
+                  (listener.verification_status || 'pending') === 'rejected' ? '#fef2f2' :
+                  (listener.verification_status || 'pending') === 'reapplied' ? '#fff7ed' : '#fffbeb'
               }}>
                 <div className="flex items-center gap-3">
                   {(listener.verification_status || 'pending') === 'approved' ? (
@@ -861,24 +936,51 @@ const ListenerDetails = () => {
                     <div className="p-2 bg-red-500 rounded-lg">
                       <XCircle className="w-5 h-5 text-white" />
                     </div>
+                  ) : (listener.verification_status || 'pending') === 'reapplied' ? (
+                    <div className="p-2 bg-orange-500 rounded-lg">
+                      <RotateCcw className="w-5 h-5 text-white" />
+                    </div>
                   ) : (
                     <div className="p-2 bg-yellow-500 rounded-lg">
                       <AlertCircle className="w-5 h-5 text-white" />
                     </div>
                   )}
                   <div className="flex-1">
-                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
-                      Status: {(listener.verification_status || 'pending').toUpperCase()}
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                        Status: {(listener.verification_status || 'pending').toUpperCase()}
+                      </div>
+                      {(listener.verification_status || 'pending') === 'reapplied' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700 border border-orange-300">
+                          <RotateCcw className="w-3 h-3" />
+                          Reapplied
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
                       {(listener.verification_status || 'pending') === 'approved' 
                         ? 'Listener is visible to users and can receive calls/chats'
                         : (listener.verification_status || 'pending') === 'rejected'
                         ? 'Listener is hidden and cannot receive calls/chats'
+                        : (listener.verification_status || 'pending') === 'reapplied'
+                        ? `Listener reapplied for verification (attempt ${listener.reapply_attempts || 1} of 3)`
                         : 'Awaiting verification - hidden from users'}
                     </div>
                   </div>
                 </div>
+                {/* Show rejection reason if exists */}
+                {listener.rejection_reason && (listener.verification_status === 'rejected') && (
+                  <div className="mt-3 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg border border-red-200 dark:border-red-800">
+                    <div className="text-xs font-semibold text-red-700 dark:text-red-400 mb-1">Rejection Reason:</div>
+                    <div className="text-sm text-red-800 dark:text-red-300">{listener.rejection_reason}</div>
+                  </div>
+                )}
+                {/* Show reapply attempts count */}
+                {(listener.reapply_attempts > 0) && (
+                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    Reapply attempts used: {listener.reapply_attempts} / 3
+                  </div>
+                )}
               </div>
 
               {verificationSuccess && (
@@ -912,7 +1014,7 @@ const ListenerDetails = () => {
                     onClick={() => handleVerificationStatusChange('pending')}
                     disabled={updatingVerification}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg font-semibold text-sm transition-all duration-200 border ${
-                      (listener.verification_status || 'pending') === 'pending'
+                      ['pending', 'reapplied'].includes(listener.verification_status || 'pending')
                         ? 'bg-yellow-500 text-white shadow-lg shadow-yellow-500/30 border-yellow-500 scale-[1.02]'
                         : 'text-gray-600 dark:text-gray-300 border-transparent hover:bg-white/60 dark:hover:bg-gray-600'
                     } ${updatingVerification ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
@@ -1061,6 +1163,88 @@ const ListenerDetails = () => {
           </div>
         </div>
       </div>
+
+      {/* Rejection Reason Modal */}
+      {showRejectModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6 animate-in fade-in">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                <XCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">Reject Listener</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Please provide a reason for rejection</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 block">
+                  Rejection Reason
+                </label>
+                <div className="space-y-2">
+                  {REJECTION_REASONS.map((reason) => (
+                    <label
+                      key={reason}
+                      className={`flex items-center gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                        rejectionReason === reason
+                          ? 'border-red-500 bg-red-50 dark:bg-red-900/20'
+                          : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="rejectionReason"
+                        value={reason}
+                        checked={rejectionReason === reason}
+                        onChange={(e) => setRejectionReason(e.target.value)}
+                        className="w-4 h-4 text-red-500 focus:ring-red-500"
+                      />
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{reason}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {rejectionReason === 'Other' && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 block">
+                    Custom Reason
+                  </label>
+                  <textarea
+                    value={customRejectionReason}
+                    onChange={(e) => setCustomRejectionReason(e.target.value)}
+                    placeholder="Enter the reason for rejection..."
+                    className="w-full p-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none resize-none"
+                    rows={3}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowRejectModal(false)}
+                className="flex-1 px-4 py-3 rounded-lg border-2 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 font-semibold text-sm hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReject}
+                disabled={!rejectionReason || (rejectionReason === 'Other' && !customRejectionReason.trim())}
+                className={`flex-1 px-4 py-3 rounded-lg font-semibold text-sm transition-all ${
+                  rejectionReason && (rejectionReason !== 'Other' || customRejectionReason.trim())
+                    ? 'bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/30'
+                    : 'bg-gray-200 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                Confirm Reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -82,8 +82,8 @@ export const getAdminListeners = () => api.get('/admin/listeners');
 export const getContactMessages = (params = {}) => api.get('/admin/contact-messages', { params });
 export const getDeleteRequests = (params = {}) => api.get('/admin/delete-requests', { params });
 export const deleteDeleteRequest = (request_id) => api.delete(`/admin/delete-requests/${request_id}`);
-export const updateListenerVerificationStatus = (listener_id, status) => 
-  api.put(`/admin/listeners/${listener_id}/verification-status`, { status });
+export const updateListenerVerificationStatus = (listener_id, status, rejection_reason = null) => 
+  api.put(`/admin/listeners/${listener_id}/verification-status`, { status, rejection_reason });
 export const setListenerRates = (payload) => api.post('/admin/listener/set-rates', payload);
 export const updateListenerRates = (listener_id, payload) =>
   api.put(`/admin/listener/update-rates/${listener_id}`, payload);

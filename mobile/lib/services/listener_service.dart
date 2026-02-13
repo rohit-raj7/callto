@@ -350,6 +350,26 @@ class ListenerService {
       );
     }
   }
+
+  /// Reapply for verification after rejection (max 3 attempts)
+  Future<ListenerDetailResult> reapplyForVerification() async {
+    final response = await _api.post(
+      '${ApiConfig.listeners}/me/reapply',
+      body: {},
+    );
+
+    if (response.isSuccess) {
+      return ListenerDetailResult(
+        success: true,
+        message: response.data['message'] ?? 'Reapplication submitted successfully',
+      );
+    } else {
+      return ListenerDetailResult(
+        success: false,
+        error: response.error ?? 'Failed to submit reapplication',
+      );
+    }
+  }
 }
 
 /// Result class for list of listeners

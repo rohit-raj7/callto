@@ -510,9 +510,15 @@ const ListenerProfile = () => {
                     <div className="flex justify-between">
                       <span className="text-gray-600">Verification:</span>
                       <span className={`px-2 py-1 rounded text-sm font-medium ${
-                        listener.is_verified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                        listener.verification_status === 'approved' ? 'bg-green-100 text-green-800' 
+                        : listener.verification_status === 'rejected' ? 'bg-red-100 text-red-800'
+                        : listener.verification_status === 'reapplied' ? 'bg-orange-100 text-orange-800'
+                        : 'bg-yellow-100 text-yellow-800'
                       }`}>
-                        {listener.is_verified ? 'Verified' : 'Pending'}
+                        {listener.verification_status === 'approved' ? 'Verified' 
+                        : listener.verification_status === 'rejected' ? 'Rejected'
+                        : listener.verification_status === 'reapplied' ? 'Reapplied'
+                        : 'Pending'}
                       </span>
                     </div>
                     <div className="flex justify-between">
