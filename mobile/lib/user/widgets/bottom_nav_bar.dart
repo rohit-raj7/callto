@@ -3,6 +3,7 @@ import '../screens/home_screen.dart';
 import '../screens/random_call_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/recents_screen.dart';
+import '../../services/offer_banner_controller.dart';
 
 class BottomNavBar extends StatefulWidget {
   const BottomNavBar({super.key});
@@ -13,6 +14,7 @@ class BottomNavBar extends StatefulWidget {
 
 class _BottomNavBarState extends State<BottomNavBar> {
   int _currentIndex = 0;
+  final OfferBannerController _offerCtrl = OfferBannerController();
 
   late final List<Widget> _screens;
 
@@ -48,6 +50,10 @@ class _BottomNavBarState extends State<BottomNavBar> {
           setState(() {
             _currentIndex = index;
           });
+          // Refresh offer banner when Call tab (index 0) is tapped
+          if (index == 0) {
+            _offerCtrl.refresh();
+          }
         },
         items: const [
           BottomNavigationBarItem(

@@ -6,12 +6,11 @@ import '../widgets/offer_banner.dart';
 import '../widgets/top_bar.dart';
 import '../../services/call_service.dart';
 import '../../services/listener_service.dart';
-import '../../services/offer_service.dart';
+import '../../services/offer_banner_controller.dart';
 import '../../services/socket_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/user_service.dart';
 import '../../models/listener_model.dart' as listener_model;
-import '../../models/offer_model.dart';
 import '../../models/user_model.dart';
 import '../../ui/skeleton_loading_ui/listener_card_skeleton.dart';
 
@@ -27,7 +26,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final CallService _callService = CallService();
   final StorageService _storageService = StorageService();
   final UserService _userService = UserService();
-  final OfferService _offerService = OfferService();
+  final OfferBannerController _offerCtrl = OfferBannerController();
 
   String? selectedTopic;
   Map<String, bool> listenerOnlineMap = {};
@@ -40,8 +39,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isFirstTimeEligible = false;
   bool _hasCompletedOfferCall = false;
   int? _offerMinutesLimitOverride;
-  OfferFetchResult? _offerBannerResult;
-  bool _offerBannerHiddenLocally = false;
 
   // Stream subscriptions for cleanup
   StreamSubscription<Map<String, bool>>? _onlineStatusSub;
@@ -64,7 +61,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _loadOfferEligibility();
     _loadRateConfig();
-    _refreshOfferBanner();
+
+    // Fetch offer banner via shared controller
+    _offerCtrl.refresh();
+    // Listen for state changes so we rebuild when banner data arrives
+    _offerCtrl.result.addListener(_onOfferChanged);
+    _offerCtrl.hiddenLocally.addListener(_onOfferChanged);
 
     // Connect to socket first to get initial presence status
     SocketService().connectListener().then((_) {
@@ -101,13 +103,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _onlineStatusSub?.cancel();
     _busyStatusSub?.cancel();
+    _offerCtrl.result.removeListener(_onOfferChanged);
+    _offerCtrl.hiddenLocally.removeListener(_onOfferChanged);
     super.dispose();
+  }
+
+  void _onOfferChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _refreshOfferBanner();
+      _offerCtrl.refresh();
     }
   }
 
@@ -271,51 +279,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _refreshHomeData() async {
-    await Future.wait([_loadListeners(), _refreshOfferBanner()]);
+    await Future.wait([_loadListeners(), _offerCtrl.refresh()]);
   }
 
-  Future<void> _refreshOfferBanner({int retryCount = 0}) async {
-    try {
-      final result = await _offerService.fetchOfferBanner();
-      if (!mounted) return;
-
-      print('[HOME] Offer banner result: success=${result.success}, '
-          'shouldShow=${result.shouldShowBanner}, '
-          'hasOffer=${result.offer != null}, '
-          'dismissed=${result.dismissedToday}, '
-          'error=${result.error}');
-
-      setState(() {
-        _offerBannerResult = result;
-        _offerBannerHiddenLocally = false;
-      });
-
-      // If the first attempt returned no banner (e.g. cold start / timing),
-      // retry once after a short delay.
-      if (!result.shouldShowBanner && retryCount < 1) {
-        Future.delayed(const Duration(seconds: 4), () {
-          if (mounted) _refreshOfferBanner(retryCount: retryCount + 1);
-        });
-      }
-    } catch (e) {
-      print('[HOME] Offer banner fetch error: $e');
-      // Retry on error as well
-      if (retryCount < 1 && mounted) {
-        Future.delayed(const Duration(seconds: 4), () {
-          if (mounted) _refreshOfferBanner(retryCount: retryCount + 1);
-        });
-      }
-    }
-  }
-
-  Future<void> _dismissOfferBanner(OfferModel offer) async {
-    if (!mounted) return;
-
-    setState(() {
-      _offerBannerHiddenLocally = true;
-    });
-
-    await _offerService.dismissOfferForToday(offer.offerId);
+  Future<void> _dismissOfferBanner() async {
+    await _offerCtrl.dismiss();
   }
 
   void _filterByTopic(String? topic) {
@@ -415,36 +383,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildOfferBannerState() {
-    final result = _offerBannerResult;
-
-    // Nothing fetched yet, or fetch failed, or banner shouldn't show → render nothing.
-    if (result == null ||
-        !result.success ||
-        result.offer == null ||
-        !result.shouldShowBanner ||
-        _offerBannerHiddenLocally) {
-      print('[HOME] Banner hidden: result=${result != null}, '
-          'success=${result?.success}, '
-          'hasOffer=${result?.offer != null}, '
-          'shouldShow=${result?.shouldShowBanner}, '
-          'hiddenLocally=$_offerBannerHiddenLocally');
+    if (!_offerCtrl.shouldShow) {
       return const SizedBox.shrink();
     }
 
-    final offer = result.offer!;
+    final offer = _offerCtrl.offer!;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       child: OfferBanner(
         offer: offer,
-        onClose: () {
-          _dismissOfferBanner(offer);
-        },
+        onClose: _dismissOfferBanner,
         onExpired: () {
           if (!mounted) return;
-          setState(() {
-            _offerBannerHiddenLocally = true;
-          });
+          _offerCtrl.hiddenLocally.value = true;
         },
       ),
     );
