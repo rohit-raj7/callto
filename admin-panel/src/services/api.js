@@ -96,6 +96,8 @@ export const updateRateConfig = (payload) => api.put('/admin/rate-config', paylo
 // Chat Charge Config methods
 export const getChatChargeConfig = () => api.get('/admin/chat-charge-config');
 export const updateChatChargeConfig = (payload) => api.put('/admin/chat-charge-config', payload);
+export const getOfferBannerConfig = () => api.get('/admin/offer-banner');
+export const updateOfferBannerConfig = (payload) => api.put('/admin/offer-banner', payload);
 
 export const getOutbox = (params = {}) => api.get('/notifications/outbox', { params });
 export const updateOutbox = (id, payload) => api.put(`/notifications/outbox/${id}`, payload);

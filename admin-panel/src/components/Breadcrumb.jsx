@@ -15,6 +15,7 @@ const Breadcrumb = () => {
     'send-notification': 'Send Notification',
     'contact-messages': 'Contact Messages',
     'delete-requests': 'Delete Requests',
+    'offer-banner': 'Offer Banner',
   };
 
   return (

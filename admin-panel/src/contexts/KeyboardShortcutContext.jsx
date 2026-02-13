@@ -18,7 +18,8 @@ export const KeyboardShortcutProvider = ({ children }) => {
     'ctrl+d': 'Toggle dark mode',
     'g d': 'Go to dashboard',
     'g u': 'Go to users',
-    'g l': 'Go to listeners'
+    'g l': 'Go to listeners',
+    'g b': 'Go to offer banner'
   });
 
   const [showShortcuts, setShowShortcuts] = useState(false);

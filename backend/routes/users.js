@@ -144,6 +144,101 @@ router.get('/wallet', authenticate, async (req, res) => {
   }
 });
 
+// GET /api/users/offer-banner
+// Returns active offer banner only for eligible users (wallet below threshold)
+router.get('/offer-banner', authenticate, async (req, res) => {
+  try {
+    await pool.query(
+      `INSERT INTO wallets (user_id, balance)
+       VALUES ($1, 0.0)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [req.userId]
+    );
+
+    const [walletResult, offerResult, debugResult] = await Promise.all([
+      pool.query('SELECT balance FROM wallets WHERE user_id = $1 LIMIT 1', [req.userId]),
+      pool.query(
+        `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
+                recharge_amount, discounted_amount, min_wallet_balance,
+                starts_at, expires_at, is_active, updated_at
+         FROM offer_banner_config
+         WHERE is_active = TRUE
+           AND (starts_at IS NULL OR starts_at <= CURRENT_TIMESTAMP)
+           AND expires_at > CURRENT_TIMESTAMP
+         ORDER BY updated_at DESC
+         LIMIT 1`
+      ),
+      pool.query(
+        `SELECT config_id, is_active, starts_at, expires_at, updated_at
+         FROM offer_banner_config
+         ORDER BY updated_at DESC
+         LIMIT 3`
+      ),
+    ]);
+
+    const walletBalance = Number(walletResult.rows[0]?.balance ?? 0);
+    const activeBanner = offerResult.rows[0];
+
+    // Debug logging to help diagnose banner visibility issues
+    console.log('[offer-banner] userId:', req.userId, '| walletBalance:', walletBalance,
+      '| activeBannerFound:', Boolean(activeBanner),
+      '| totalConfigRows:', debugResult.rows.length);
+    if (debugResult.rows.length > 0) {
+      debugResult.rows.forEach((r, i) => {
+        console.log(`[offer-banner]   row[${i}]: is_active=${r.is_active}, expires_at=${r.expires_at}, starts_at=${r.starts_at}`);
+      });
+    }
+
+    if (!activeBanner) {
+      const reason = debugResult.rows.length === 0
+        ? 'no_config_rows'
+        : debugResult.rows.some(r => r.is_active)
+          ? 'active_but_expired_or_not_started'
+          : 'none_active';
+      console.log('[offer-banner] Returning activeOffer=false, reason:', reason);
+      return res.json({
+        activeOffer: false,
+        walletBalance,
+        reason,
+      });
+    }
+
+    const minWalletBalance = 5;
+    if (walletBalance >= minWalletBalance) {
+      console.log('[offer-banner] Returning activeOffer=false, reason: wallet_sufficient', walletBalance, '>=', minWalletBalance);
+      return res.json({
+        activeOffer: false,
+        walletBalance,
+        minWalletBalance,
+        reason: 'wallet_sufficient',
+      });
+    }
+
+    res.json({
+      activeOffer: true,
+      walletBalance,
+      minWalletBalance,
+      offerBanner: {
+        offerId: activeBanner.config_id,
+        title: activeBanner.title,
+        headline: activeBanner.headline,
+        subtext: activeBanner.subtext,
+        buttonText: activeBanner.button_text,
+        countdownPrefix: activeBanner.countdown_prefix,
+        rechargeAmount: Number(activeBanner.recharge_amount),
+        discountedAmount: Number(activeBanner.discounted_amount),
+        startsAt: activeBanner.starts_at,
+        expiresAt: activeBanner.expires_at,
+        isActive: activeBanner.is_active === true,
+        updatedAt: activeBanner.updated_at,
+      },
+    });
+  } catch (error) {
+    console.error('Get offer banner error:', error);
+    res.status(500).json({ error: 'Failed to fetch offer banner' });
+  }
+});
+
 // POST /api/users/wallet/add
 // Add balance to wallet after successful payment
 router.post('/wallet/add', authenticate, async (req, res) => {

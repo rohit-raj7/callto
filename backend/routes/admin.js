@@ -13,6 +13,38 @@ import { authenticateAdmin } from '../middleware/auth.js';
 const router = express.Router();
 const googleClient = new OAuth2Client(process.env.admin_google_client_id);
 
+const defaultOfferBannerConfig = {
+  offerId: null,
+  title: 'Limited Time Offer',
+  headline: 'Flat 25% OFF',
+  subtext: 'on recharge of \u20B9100',
+  buttonText: 'Recharge for \u20B975',
+  countdownPrefix: 'Offer ends in',
+  rechargeAmount: 100,
+  discountedAmount: 75,
+  minWalletBalance: 5,
+  startsAt: null,
+  expiresAt: null,
+  isActive: false,
+  updatedAt: null,
+};
+
+const mapOfferBannerRow = (row) => ({
+  offerId: row.config_id,
+  title: row.title,
+  headline: row.headline,
+  subtext: row.subtext,
+  buttonText: row.button_text,
+  countdownPrefix: row.countdown_prefix,
+  rechargeAmount: Number(row.recharge_amount),
+  discountedAmount: Number(row.discounted_amount),
+  minWalletBalance: Number(row.min_wallet_balance),
+  startsAt: row.starts_at,
+  expiresAt: row.expires_at,
+  isActive: row.is_active === true,
+  updatedAt: row.updated_at,
+});
+
 // Admin Google login
 router.post('/google-login', async (req, res) => {
   try {
@@ -695,6 +727,174 @@ router.get('/users/:user_id/transactions', authenticateAdmin, async (req, res) =
   } catch (error) {
     console.error('Get user transactions error:', error);
     res.status(500).json({ error: 'Failed to fetch user transactions' });
+  }
+});
+
+// ============================================
+// OFFER BANNER CONFIG ROUTES
+// ============================================
+
+// GET /api/admin/offer-banner
+router.get('/offer-banner', authenticateAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
+              recharge_amount, discounted_amount, min_wallet_balance,
+              starts_at, expires_at, is_active, updated_at
+       FROM offer_banner_config
+       ORDER BY updated_at DESC
+       LIMIT 1`
+    );
+
+    const row = result.rows[0];
+    res.json({
+      hasConfig: Boolean(row),
+      offerBanner: row ? mapOfferBannerRow(row) : defaultOfferBannerConfig,
+    });
+  } catch (error) {
+    console.error('Get offer banner config error:', error);
+    res.status(500).json({ error: 'Failed to fetch offer banner config' });
+  }
+});
+
+// PUT /api/admin/offer-banner
+router.put('/offer-banner', authenticateAdmin, async (req, res) => {
+  try {
+    const {
+      title,
+      headline,
+      subtext,
+      buttonText,
+      countdownPrefix,
+      rechargeAmount,
+      discountedAmount,
+      startsAt,
+      expiresAt,
+      isActive,
+    } = req.body || {};
+
+    const normalizedTitle = String(title ?? '').trim();
+    const normalizedHeadline = String(headline ?? '').trim();
+    const normalizedSubtext = String(subtext ?? '').trim();
+    const normalizedButtonText = String(buttonText ?? '').trim();
+    const normalizedCountdownPrefix = String(countdownPrefix ?? '').trim();
+
+    if (!normalizedTitle) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+    if (!normalizedHeadline) {
+      return res.status(400).json({ error: 'headline is required' });
+    }
+    if (!normalizedSubtext) {
+      return res.status(400).json({ error: 'subtext is required' });
+    }
+    if (!normalizedButtonText) {
+      return res.status(400).json({ error: 'buttonText is required' });
+    }
+    if (!normalizedCountdownPrefix) {
+      return res.status(400).json({ error: 'countdownPrefix is required' });
+    }
+
+    const parsedRechargeAmount = Number(rechargeAmount);
+    const parsedDiscountedAmount = Number(discountedAmount);
+    const parsedMinWalletBalance = 5;
+
+    if (!Number.isFinite(parsedRechargeAmount) || parsedRechargeAmount <= 0) {
+      return res.status(400).json({ error: 'rechargeAmount must be a positive number' });
+    }
+    if (!Number.isFinite(parsedDiscountedAmount) || parsedDiscountedAmount <= 0) {
+      return res.status(400).json({ error: 'discountedAmount must be a positive number' });
+    }
+    if (parsedDiscountedAmount >= parsedRechargeAmount) {
+      return res.status(400).json({ error: 'discountedAmount must be lower than rechargeAmount' });
+    }
+    const hasStartsAt = startsAt !== undefined && startsAt !== null && String(startsAt).trim() !== '';
+    const parsedStartsAt = hasStartsAt ? new Date(startsAt) : null;
+    const parsedExpiresAt = new Date(expiresAt);
+
+    if (hasStartsAt && Number.isNaN(parsedStartsAt.getTime())) {
+      return res.status(400).json({ error: 'startsAt must be a valid datetime' });
+    }
+    if (Number.isNaN(parsedExpiresAt.getTime())) {
+      return res.status(400).json({ error: 'expiresAt must be a valid datetime' });
+    }
+    if (parsedStartsAt && parsedExpiresAt <= parsedStartsAt) {
+      return res.status(400).json({ error: 'expiresAt must be greater than startsAt' });
+    }
+
+    const enableBanner = isActive === true;
+
+    // Auto-fix: if enabling the banner but expiresAt is in the past, extend to 7 days from now
+    let finalStartsAt = parsedStartsAt;
+    let finalExpiresAt = parsedExpiresAt;
+    if (enableBanner && finalExpiresAt <= new Date()) {
+      finalStartsAt = new Date();
+      finalExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      console.log('[admin offer-banner] Auto-extended expired dates. New startsAt:', finalStartsAt, 'expiresAt:', finalExpiresAt);
+    }
+
+    const client = await pool.connect();
+    let saveResult;
+    try {
+      await client.query('BEGIN');
+
+      // Keep exactly one active banner at a time.
+      await client.query(
+        `UPDATE offer_banner_config
+         SET is_active = FALSE
+         WHERE is_active = TRUE`
+      );
+
+      saveResult = await client.query(
+        `INSERT INTO offer_banner_config (
+           title,
+           headline,
+           subtext,
+           button_text,
+           countdown_prefix,
+           recharge_amount,
+           discounted_amount,
+           min_wallet_balance,
+           starts_at,
+           expires_at,
+           is_active,
+           updated_by
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         RETURNING config_id, title, headline, subtext, button_text, countdown_prefix,
+                   recharge_amount, discounted_amount, min_wallet_balance,
+                   starts_at, expires_at, is_active, updated_at`,
+        [
+          normalizedTitle,
+          normalizedHeadline,
+          normalizedSubtext,
+          normalizedButtonText,
+          normalizedCountdownPrefix,
+          parsedRechargeAmount,
+          parsedDiscountedAmount,
+          parsedMinWalletBalance,
+          finalStartsAt,
+          finalExpiresAt,
+          enableBanner,
+          req.adminId || null,
+        ],
+      );
+
+      await client.query('COMMIT');
+    } catch (dbError) {
+      await client.query('ROLLBACK');
+      throw dbError;
+    } finally {
+      client.release();
+    }
+
+    res.json({
+      message: 'Offer banner config updated',
+      offerBanner: mapOfferBannerRow(saveResult.rows[0]),
+    });
+  } catch (error) {
+    console.error('Update offer banner config error:', error);
+    res.status(500).json({ error: 'Failed to update offer banner config' });
   }
 });
 

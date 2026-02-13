@@ -24,6 +24,7 @@ const Sidebar = () => {
     { id: 'call-rate-config', label: 'Call Rate Config', icon: Settings, path: '/admin-no-all-call/call-rate-config', shortcut: 'G O' },
     { id: 'chat-charge-config', label: 'Chat Config', icon: Settings, path: '/admin-no-all-call/chat-charge-config', shortcut: 'G H' },
     { id: 'recharge-packs', label: 'Recharge Packs', icon: CreditCard, path: '/admin-no-all-call/recharge-packs', shortcut: 'G P' },
+    { id: 'offer-banner', label: 'Offer Banner', icon: Settings, path: '/admin-no-all-call/offer-banner', shortcut: 'G B' },
     { id: 'user-contacts', label: 'User Contacts', icon: Contact, path: '/admin-no-all-call/user-contacts', shortcut: 'G C' },
     { id: 'send-notification', label: 'Send Notification', icon: Bell, path: '/admin-no-all-call/send-notification', shortcut: 'G N' },
     { id: 'contact-messages', label: 'Contact Messages', icon: Contact, path: '/admin-no-all-call/contact-messages', shortcut: 'G M' },
@@ -139,7 +140,7 @@ const Sidebar = () => {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-2 space-y-1">
+        <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain scroll-smooth [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           {menuItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
@@ -220,7 +221,7 @@ const Sidebar = () => {
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">CallTo Admin</h1>
         </div>
 
-        <nav className="flex-1 px-4 py-2 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto overflow-x-hidden overscroll-contain scroll-smooth [scrollbar-gutter:stable] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-600">
           {menuItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (

@@ -28,6 +28,7 @@ class ApiConfig {
   static final String userProfile = '$apiBase/users/profile';
   static final String userLanguages = '$apiBase/users/languages';
   static final String userWallet = '$apiBase/users/wallet';
+  static final String userOfferBanner = '$apiBase/users/offer-banner';
 
   static final String listeners = '$apiBase/listeners';
   static final String listenerSearch = '$apiBase/listeners/search';

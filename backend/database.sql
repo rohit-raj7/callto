@@ -196,6 +196,30 @@ CREATE TABLE IF NOT EXISTS rate_config_audit (
 CREATE INDEX IF NOT EXISTS idx_rate_config_audit_created_at ON rate_config_audit(created_at DESC);
 
 -- ============================================
+-- OFFER BANNER CONFIGURATION TABLE
+-- ============================================
+CREATE TABLE IF NOT EXISTS offer_banner_config (
+    config_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(120) NOT NULL,
+    headline VARCHAR(120) NOT NULL,
+    subtext VARCHAR(200) NOT NULL,
+    button_text VARCHAR(120) NOT NULL,
+    countdown_prefix VARCHAR(120) NOT NULL DEFAULT 'Offer ends in',
+    recharge_amount DECIMAL(10, 2) NOT NULL,
+    discounted_amount DECIMAL(10, 2) NOT NULL,
+    min_wallet_balance DECIMAL(10, 2) NOT NULL DEFAULT 5.00,
+    starts_at TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by UUID REFERENCES admins(admin_id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_offer_banner_config_updated_at ON offer_banner_config(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_offer_banner_config_active ON offer_banner_config(is_active, expires_at);
+
+-- ============================================
 -- CHATS TABLE
 -- ============================================
 CREATE TABLE IF NOT EXISTS chats (

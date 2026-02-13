@@ -1,14 +1,17 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../widgets/expert_card.dart';
+import '../widgets/offer_banner.dart';
 import '../widgets/top_bar.dart';
 import '../../services/call_service.dart';
 import '../../services/listener_service.dart';
+import '../../services/offer_service.dart';
 import '../../services/socket_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/user_service.dart';
 import '../../models/listener_model.dart' as listener_model;
+import '../../models/offer_model.dart';
 import '../../models/user_model.dart';
 import '../../ui/skeleton_loading_ui/listener_card_skeleton.dart';
 
@@ -19,12 +22,13 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final ListenerService _listenerService = ListenerService();
   final CallService _callService = CallService();
   final StorageService _storageService = StorageService();
   final UserService _userService = UserService();
-  
+  final OfferService _offerService = OfferService();
+
   String? selectedTopic;
   Map<String, bool> listenerOnlineMap = {};
   Map<String, bool> listenerBusyMap = {};
@@ -36,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isFirstTimeEligible = false;
   bool _hasCompletedOfferCall = false;
   int? _offerMinutesLimitOverride;
+  OfferFetchResult? _offerBannerResult;
+  bool _offerBannerHiddenLocally = false;
 
   // Stream subscriptions for cleanup
   StreamSubscription<Map<String, bool>>? _onlineStatusSub;
@@ -53,11 +59,13 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     selectedTopic = 'All';
 
     _loadOfferEligibility();
     _loadRateConfig();
-    
+    _refreshOfferBanner();
+
     // Connect to socket first to get initial presence status
     SocketService().connectListener().then((_) {
       if (mounted) {
@@ -90,9 +98,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _onlineStatusSub?.cancel();
     _busyStatusSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshOfferBanner();
+    }
   }
 
   Future<void> _loadOfferEligibility() async {
@@ -111,7 +127,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
     } catch (_) {
-      // Backend unreachable — fall back to cached data below
+      // Backend unreachable - fall back to cached data below
     }
 
     // 2) Fallback: read from local storage cache
@@ -189,8 +205,9 @@ class _HomeScreenState extends State<HomeScreen> {
           return billedMinutes >= offerMinutesLimit;
         });
       } else {
-        hasCompletedOfferCall =
-            result.calls.any((call) => call.status == 'completed');
+        hasCompletedOfferCall = result.calls.any(
+          (call) => call.status == 'completed',
+        );
       }
 
       if (hasCompletedOfferCall && mounted) {
@@ -218,14 +235,18 @@ class _HomeScreenState extends State<HomeScreen> {
       // Fetch all Experts (online and offline) with high limit
       print('[HOME] Fetching Experts...');
       final result = await _listenerService.getListeners(limit: 100);
-      print('[HOME] Result success: ${result.success}, count: ${result.listeners.length}');
-      
+      print(
+        '[HOME] Result success: ${result.success}, count: ${result.listeners.length}',
+      );
+
       if (result.success) {
         // Log all fetched Experts for debugging
         for (var listener in result.listeners) {
-          print('[HOME] Listener: ${listener.professionalName}, ID: ${listener.listenerId}, userId: ${listener.userId}, isAvailable: ${listener.isAvailable}');
+          print(
+            '[HOME] Listener: ${listener.professionalName}, ID: ${listener.listenerId}, userId: ${listener.userId}, isAvailable: ${listener.isAvailable}',
+          );
         }
-        
+
         setState(() {
           _listeners = result.listeners;
           _filterListeners();
@@ -249,6 +270,54 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _refreshHomeData() async {
+    await Future.wait([_loadListeners(), _refreshOfferBanner()]);
+  }
+
+  Future<void> _refreshOfferBanner({int retryCount = 0}) async {
+    try {
+      final result = await _offerService.fetchOfferBanner();
+      if (!mounted) return;
+
+      print('[HOME] Offer banner result: success=${result.success}, '
+          'shouldShow=${result.shouldShowBanner}, '
+          'hasOffer=${result.offer != null}, '
+          'dismissed=${result.dismissedToday}, '
+          'error=${result.error}');
+
+      setState(() {
+        _offerBannerResult = result;
+        _offerBannerHiddenLocally = false;
+      });
+
+      // If the first attempt returned no banner (e.g. cold start / timing),
+      // retry once after a short delay.
+      if (!result.shouldShowBanner && retryCount < 1) {
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted) _refreshOfferBanner(retryCount: retryCount + 1);
+        });
+      }
+    } catch (e) {
+      print('[HOME] Offer banner fetch error: $e');
+      // Retry on error as well
+      if (retryCount < 1 && mounted) {
+        Future.delayed(const Duration(seconds: 4), () {
+          if (mounted) _refreshOfferBanner(retryCount: retryCount + 1);
+        });
+      }
+    }
+  }
+
+  Future<void> _dismissOfferBanner(OfferModel offer) async {
+    if (!mounted) return;
+
+    setState(() {
+      _offerBannerHiddenLocally = true;
+    });
+
+    await _offerService.dismissOfferForToday(offer.offerId);
+  }
+
   void _filterByTopic(String? topic) {
     setState(() {
       selectedTopic = topic;
@@ -258,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _filterListeners() {
     List<listener_model.Listener> filtered;
-    
+
     if (selectedTopic == 'All') {
       filtered = List.from(_listeners);
     } else {
@@ -266,35 +335,39 @@ class _HomeScreenState extends State<HomeScreen> {
         return listener.specialties.contains(selectedTopic);
       }).toList();
     }
-    
+
     // Sort by online status: online listeners first, then by rating
     filtered.sort((a, b) {
       final aOnline = _isListenerOnline(a);
       final bOnline = _isListenerOnline(b);
-      
-      if (aOnline && !bOnline) return -1; // a is online, b is offline -> a first
-      if (!aOnline && bOnline) return 1;  // a is offline, b is online -> b first
-      
+
+      if (aOnline && !bOnline) {
+        return -1; // a is online, b is offline -> a first
+      }
+      if (!aOnline && bOnline) {
+        return 1; // a is offline, b is online -> b first
+      }
+
       // Both same status, sort by rating
       return b.rating.compareTo(a.rating);
     });
-    
+
     _filteredListeners = filtered;
   }
-  
+
   /// Check if a listener is online using both API data and socket status
   bool _isListenerOnline(listener_model.Listener listener) {
     // Check socket map first (real-time status)
     final userId = listener.userId;
     final listenerId = listener.listenerId;
-    
+
     if (listenerOnlineMap.containsKey(userId)) {
       return listenerOnlineMap[userId]!;
     }
     if (listenerOnlineMap.containsKey(listenerId)) {
       return listenerOnlineMap[listenerId]!;
     }
-    
+
     // Fall back to API status
     return listener.isOnline;
   }
@@ -338,12 +411,47 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     final offerPerMinute = price / minutes;
-    return '₹${_formatOfferAmount(offerPerMinute)}/min';
+    return '\u20B9${_formatOfferAmount(offerPerMinute)}/min';
+  }
+
+  Widget _buildOfferBannerState() {
+    final result = _offerBannerResult;
+
+    // Nothing fetched yet, or fetch failed, or banner shouldn't show → render nothing.
+    if (result == null ||
+        !result.success ||
+        result.offer == null ||
+        !result.shouldShowBanner ||
+        _offerBannerHiddenLocally) {
+      print('[HOME] Banner hidden: result=${result != null}, '
+          'success=${result?.success}, '
+          'hasOffer=${result?.offer != null}, '
+          'shouldShow=${result?.shouldShowBanner}, '
+          'hiddenLocally=$_offerBannerHiddenLocally');
+      return const SizedBox.shrink();
+    }
+
+    final offer = result.offer!;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: OfferBanner(
+        offer: offer,
+        onClose: () {
+          _dismissOfferBanner(offer);
+        },
+        onExpired: () {
+          if (!mounted) return;
+          setState(() {
+            _offerBannerHiddenLocally = true;
+          });
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
@@ -351,6 +459,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const TopBar(),
+            _buildOfferBannerState(),
 
             // Title + Dropdown Filter
             Padding(
@@ -379,7 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(25),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.grey.withOpacity(0.15),
+                          color: Colors.grey.withValues(alpha: 0.15),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),
@@ -401,17 +510,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         dropdownColor: Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        items: topics.map<DropdownMenuItem<String>>((String value) {
+                        items: topics.map<DropdownMenuItem<String>>((
+                          String value,
+                        ) {
                           return DropdownMenuItem<String>(
                             value: value,
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
                               child: Text(
                                 value,
                                 style: TextStyle(
                                   fontSize: 14,
-                                  fontWeight: selectedTopic == value 
-                                      ? FontWeight.w600 
+                                  fontWeight: selectedTopic == value
+                                      ? FontWeight.w600
                                       : FontWeight.w500,
                                   color: selectedTopic == value
                                       ? Colors.pinkAccent
@@ -436,93 +549,98 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _isLoading
                   ? ListView.builder(
                       itemCount: 8,
-                      itemBuilder: (context, index) => const ListenerCardSkeleton(),
+                      itemBuilder: (context, index) =>
+                          const ListenerCardSkeleton(),
                     )
                   : _error != null
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.error_outline,
-                                size: 64,
-                                color: Colors.red.shade300,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _error!,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.grey.shade600,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              ElevatedButton(
-                                onPressed: _loadListeners,
-                                child: const Text('Retry'),
-                              ),
-                            ],
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 64,
+                            color: Colors.red.shade300,
                           ),
-                        )
-                      : _filteredListeners.isEmpty
-                          ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.search_off_rounded,
-                                    size: 64,
-                                    color: Colors.grey.shade300,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'No experts found',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: Colors.grey.shade600,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Try selecting a different category',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: Colors.grey.shade500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          : RefreshIndicator(
-                              onRefresh: _loadListeners,
-                              child: ListView.builder(
-                                itemCount: _filteredListeners.length,
-                                itemBuilder: (context, index) {
-                                  final listener = _filteredListeners[index];
-                                  final isOnline = _isListenerOnline(listener);
-                                  final isBusy = _isListenerBusy(listener);
-                                  final offerRateText = _buildOfferRateText();
-                                  final normalRateText =
-                                      '₹${listener.ratePerMinute.toStringAsFixed(0)}/min';
-                                  return ExpertCard(
-                                    name: listener.professionalName ?? 'Unknown',
-                                    age: listener.age ?? 20,
-                                    city: listener.location,
-                                    topic: listener.primarySpecialty,
-                                    rate: offerRateText ?? normalRateText,
-                                    secondaryRate: offerRateText != null ? normalRateText : null,
-                                    rating: listener.rating,
-                                    imagePath: listener.avatarUrl ?? 'assets/images/khushi.jpg',
-                                    languages: listener.languages,
-                                    listenerId: listener.listenerId,
-                                    listenerUserId: listener.userId,
-                                    isOnline: isOnline,
-                                    isBusy: isBusy,
-                                  );
-                                },
-                              ),
+                          const SizedBox(height: 16),
+                          Text(
+                            _error!,
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey.shade600,
                             ),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _refreshHomeData,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : _filteredListeners.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.search_off_rounded,
+                            size: 64,
+                            color: Colors.grey.shade300,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'No experts found',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Try selecting a different category',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey.shade500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _refreshHomeData,
+                      child: ListView.builder(
+                        itemCount: _filteredListeners.length,
+                        itemBuilder: (context, index) {
+                          final listener = _filteredListeners[index];
+                          final isOnline = _isListenerOnline(listener);
+                          final isBusy = _isListenerBusy(listener);
+                          final offerRateText = _buildOfferRateText();
+                          final normalRateText =
+                              '\u20B9${listener.ratePerMinute.toStringAsFixed(0)}/min';
+                          return ExpertCard(
+                            name: listener.professionalName ?? 'Unknown',
+                            age: listener.age ?? 20,
+                            city: listener.location,
+                            topic: listener.primarySpecialty,
+                            rate: offerRateText ?? normalRateText,
+                            secondaryRate: offerRateText != null
+                                ? normalRateText
+                                : null,
+                            rating: listener.rating,
+                            imagePath:
+                                listener.avatarUrl ??
+                                'assets/images/khushi.jpg',
+                            languages: listener.languages,
+                            listenerId: listener.listenerId,
+                            listenerUserId: listener.userId,
+                            isOnline: isOnline,
+                            isBusy: isBusy,
+                          );
+                        },
+                      ),
+                    ),
             ),
           ],
         ),

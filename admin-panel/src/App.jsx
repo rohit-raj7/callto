@@ -18,6 +18,7 @@ import ListenerProfile from './pages/ListenerProfile';
 import ListenerRateSettings from './pages/ListenerRateSettings';
 import CallRateConfig from './pages/CallRateConfig';
 import ChatChargeConfig from './pages/ChatChargeConfig';
+import OfferBannerConfig from './pages/OfferBannerConfig';
 import SendNotification from './pages/SendNotification';
 import RechargePacks from './pages/RechargePacks';
 import PrivateRoute from './components/PrivateRoute';
@@ -116,6 +117,15 @@ function App() {
                   <PrivateRoute>
                     <Layout>
                       <RechargePacks />
+                    </Layout>
+                  </PrivateRoute>
+                </ThemeProvider>
+              } />
+              <Route path="/admin-no-all-call/offer-banner" element={
+                <ThemeProvider>
+                  <PrivateRoute>
+                    <Layout>
+                      <OfferBannerConfig />
                     </Layout>
                   </PrivateRoute>
                 </ThemeProvider>

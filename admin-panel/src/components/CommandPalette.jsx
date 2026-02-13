@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Home, Users, Headphones, ArrowRight, Hash, Contact, Bell } from 'lucide-react';
+import { Search, Home, Users, Headphones, ArrowRight, Hash, Contact, Bell, Percent } from 'lucide-react';
 import Fuse from 'fuse.js';
 
 const CommandPalette = ({ onClose }) => {
@@ -15,10 +15,11 @@ const CommandPalette = ({ onClose }) => {
     { id: 3, type: 'page', title: 'Listeners Management', icon: Headphones, path: '/admin-no-all-call/listeners', keywords: ['listeners', 'agents'] },
     { id: 4, type: 'page', title: 'User Contacts', icon: Contact, path: '/admin-no-all-call/user-contacts', keywords: ['contacts', 'support'] },
     { id: 5, type: 'page', title: 'Send Notification', icon: Bell, path: '/admin-no-all-call/send-notification', keywords: ['notification', 'push', 'alert'] },
-    { id: 6, type: 'action', title: 'Toggle Dark Mode', icon: Hash, action: 'theme', keywords: ['dark', 'light', 'theme'] },
-    { id: 7, type: 'user', title: 'John Doe', subtitle: 'john@example.com', path: '/admin-no-all-call/users', keywords: ['john'] },
-    { id: 8, type: 'user', title: 'Sarah Smith', subtitle: 'sarah@example.com', path: '/admin-no-all-call/users', keywords: ['sarah'] },
-    { id: 9, type: 'listener', title: 'Mike Johnson', subtitle: 'Professional Listener', path: '/admin-no-all-call/listeners', keywords: ['mike'] },
+    { id: 6, type: 'page', title: 'Offer Banner', icon: Percent, path: '/admin-no-all-call/offer-banner', keywords: ['offer', 'banner', 'discount'] },
+    { id: 7, type: 'action', title: 'Toggle Dark Mode', icon: Hash, action: 'theme', keywords: ['dark', 'light', 'theme'] },
+    { id: 8, type: 'user', title: 'John Doe', subtitle: 'john@example.com', path: '/admin-no-all-call/users', keywords: ['john'] },
+    { id: 9, type: 'user', title: 'Sarah Smith', subtitle: 'sarah@example.com', path: '/admin-no-all-call/users', keywords: ['sarah'] },
+    { id: 10, type: 'listener', title: 'Mike Johnson', subtitle: 'Professional Listener', path: '/admin-no-all-call/listeners', keywords: ['mike'] },
   ];
 
   const fuse = new Fuse(items, {
