@@ -118,7 +118,15 @@ class CallController extends ChangeNotifier {
     });
 
     _callEndedSub = _socketService.onCallEnded.listen((data) {
-      debugPrint('CallController: socket call:ended – ${data['reason'] ?? 'unknown'}');
+      final reason = data['reason']?.toString() ?? 'unknown';
+      final code = data['code']?.toString() ?? '';
+      debugPrint('CallController: socket call:ended – reason=$reason code=$code');
+
+      // Handle server-initiated balance exhaustion (caller's wallet ran out)
+      if (reason == 'balance_exhausted' || code == 'MAX_DURATION_REACHED' || code == 'ZERO_BALANCE') {
+        debugPrint('[CALL-L] Caller balance exhausted — disconnecting');
+      }
+
       endCall();
     });
   }

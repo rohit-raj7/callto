@@ -285,7 +285,15 @@ class _CallingState extends State<Calling>
               // ── Avatar row ──
               _buildAvatarRow(primary, isConnected),
 
-              const Spacer(flex: 4),
+              const Spacer(flex: 2),
+
+              // ── Low balance alert (shown when ≤30s remaining) ──
+              if (isConnected &&
+                  _controller.maxAllowedSeconds > 0 &&
+                  _controller.remainingSeconds <= 30)
+                _buildLowBalanceAlert(),
+
+              const Spacer(flex: 2),
 
               // ── Bottom action bar (always visible, always tappable) ──
               _buildActionBar(primary, isEnded, audioMgr),
@@ -481,6 +489,13 @@ class _CallingState extends State<Calling>
         );
 
       case UserCallState.connected:
+        // Format remaining time for display
+        final remaining = _controller.remainingSeconds;
+        final hasTimeLimit = _controller.maxAllowedSeconds > 0;
+        final remainingMins = (remaining ~/ 60).toString().padLeft(2, '0');
+        final remainingSecs = (remaining % 60).toString().padLeft(2, '0');
+        final isLowTime = hasTimeLimit && remaining <= 30;
+
         return Column(
           key: const ValueKey('connected'),
           mainAxisSize: MainAxisSize.min,
@@ -516,6 +531,19 @@ class _CallingState extends State<Calling>
                 ),
               ],
             ),
+            // Show remaining balance time
+            if (hasTimeLimit) ...[
+              const SizedBox(height: 6),
+              Text(
+                '$remainingMins:$remainingSecs left',
+                style: TextStyle(
+                  fontSize: isSmallScreen ? 11 : 13,
+                  fontWeight: FontWeight.w500,
+                  color: isLowTime ? Colors.redAccent : Colors.white54,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
+            ],
           ],
         );
 
@@ -718,6 +746,117 @@ class _CallingState extends State<Calling>
           ),
         ),
       ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  //  LOW BALANCE ALERT — shown when ≤30s remaining
+  // ══════════════════════════════════════════════════════════════
+
+  Widget _buildLowBalanceAlert() {
+    final remaining = _controller.remainingSeconds;
+    final remainingMins = (remaining ~/ 60).toString().padLeft(2, '0');
+    final remainingSecs = (remaining % 60).toString().padLeft(2, '0');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Colors.red.shade900.withOpacity(0.85),
+              Colors.red.shade800.withOpacity(0.75),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.red.withOpacity(0.25),
+              blurRadius: 12,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.account_balance_wallet_outlined,
+                    color: Colors.white,
+                    size: 18,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Low Balance',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Call ends in $remainingMins:$remainingSecs. Add balance to continue Call.',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 36,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const WalletScreen()),
+                  );
+                },
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: const Text(
+                  'Add Balance',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.red.shade800,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

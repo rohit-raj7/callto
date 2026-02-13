@@ -32,6 +32,8 @@ import ratingRoutes from './routes/ratings.js';
 import rechargePackRoutes from './routes/rechargePacks.js';
 import User from './models/User.js';
 import Listener from './models/Listener.js'; // Import for verification checks
+import Call from './models/Call.js';
+import { markCallStarted, calculateMaxCallDuration, finalizeCallBilling as billingFinalize } from './services/callBillingService.js';
 import { Chat, Message } from './models/Chat.js';
 import ChatChargeConfig from './models/ChatChargeConfig.js';
 import { sendPushFCM } from './utils/fcm.js';
@@ -143,6 +145,8 @@ const lastSeenMap = new Map(); // Map of userId -> timestamp
 const presenceTimeouts = new Map(); // Map of userId -> timeoutId
 const busyListeners = new Map(); // Map of listenerUserId -> callId (in-memory busy tracking)
 const pendingCalls = new Map(); // Map of callId -> { callerId, listenerId, listenerSocketId, createdAt } (tracks pre-answer calls for cancel routing)
+const activeCallTimers = new Map(); // Map of callId -> { timerId, callerId, listenerUserId, channelName, startedAt, maxAllowedSeconds }
+const processingCalls = new Set(); // Dedup guard: callIds currently being set up in call:joined handler
 
 // Stale pendingCalls cleanup: remove entries older than 60 seconds
 setInterval(() => {
@@ -154,6 +158,31 @@ setInterval(() => {
     }
   }
 }, 30000);
+
+// Stale active call timer cleanup: safety net for calls whose timers were lost
+// Checks every 5 minutes for any activeCallTimers older than maxAllowedSeconds + 60s
+setInterval(() => {
+  const now = Date.now();
+  for (const [callId, timer] of activeCallTimers.entries()) {
+    const elapsed = (now - timer.startedAt) / 1000;
+    const maxWithGrace = timer.maxAllowedSeconds + 60;
+    if (elapsed > maxWithGrace) {
+      console.log(`[SOCKET] Stale activeCallTimer ${callId} removed (elapsed: ${Math.round(elapsed)}s > max: ${maxWithGrace}s)`);
+      clearTimeout(timer.timerId);
+      activeCallTimers.delete(callId);
+      // Trigger billing as safety net
+      (async () => {
+        try {
+          const billDuration = Math.min(Math.round(elapsed), timer.maxAllowedSeconds);
+          await billingFinalize({ callId, durationSeconds: billDuration });
+          console.log(`[SOCKET] Stale call ${callId}: safety billing completed (${billDuration}s)`);
+        } catch (e) {
+          console.error(`[SOCKET] Stale call ${callId}: safety billing error:`, e.message);
+        }
+      })();
+    }
+  }
+}, 300000);
 
 // WhatsApp-style chat state tracking
 const userChatState = new Map(); // Map of userId -> { activelyViewingChatId, appState: 'foreground'|'background' }
@@ -395,14 +424,131 @@ io.on('connection', (socket) => {
     activeChannels.get(channelName).add(userId);
     
     const usersInChannel = activeChannels.get(channelName);
-    if (usersInChannel.size >= 2) {
-      console.log(`[SOCKET] Both parties in ${channelName}, emitting call:connected`);
-      usersInChannel.forEach(uid => {
-        const sid = connectedUsers.get(uid);
-        if (sid) {
-          io.to(sid).emit('call:connected', { callId, channelName });
+    if (usersInChannel.size >= 2 && callId) {
+      // Dedup: prevent double execution when both parties race to this point
+      // (both call:joined events can see size >= 2 near-simultaneously)
+      if (activeCallTimers.has(callId) || processingCalls.has(String(callId))) {
+        console.log(`[SOCKET] call:joined: Call ${callId} already tracked/processing, skipping duplicate`);
+        return;
+      }
+      processingCalls.add(String(callId));
+
+      console.log(`[SOCKET] Both parties in ${channelName}, starting server-tracked call ${callId}`);
+
+      // Snapshot channel users for use in async callback / timer
+      const channelUsers = new Set(usersInChannel);
+
+      // Server-authoritative call start: mark started_at and calculate max duration
+      (async () => {
+        try {
+          const callData = await markCallStarted(callId);
+          if (!callData) {
+            console.error(`[SOCKET] Failed to mark call ${callId} as started`);
+            channelUsers.forEach(uid => {
+              const sid = connectedUsers.get(uid);
+              if (sid) io.to(sid).emit('call:connected', { callId, channelName, maxAllowedSeconds: 0 });
+            });
+            return;
+          }
+
+          const rate = Number(callData.rate_per_minute || 0);
+          const { maxAllowedSeconds, balance } = await calculateMaxCallDuration(callData.caller_id, rate);
+
+          console.log(`[SOCKET] Call ${callId}: rate=\u20b9${rate}/min, balance=\u20b9${balance}, maxAllowed=${maxAllowedSeconds}s`);
+
+          // Emit call:connected with max duration to both parties
+          channelUsers.forEach(uid => {
+            const sid = connectedUsers.get(uid);
+            if (sid) {
+              io.to(sid).emit('call:connected', {
+                callId,
+                channelName,
+                maxAllowedSeconds,
+                ratePerMinute: rate
+              });
+            }
+          });
+
+          // Server-side auto-disconnect timer
+          if (maxAllowedSeconds > 0) {
+            // Add 3-second grace period for network latency
+            const timerMs = (maxAllowedSeconds + 3) * 1000;
+            const timerId = setTimeout(async () => {
+              console.log(`[SOCKET] Call ${callId}: max duration reached (${maxAllowedSeconds}s), auto-ending`);
+              activeCallTimers.delete(callId);
+
+              // Notify both parties to disconnect
+              channelUsers.forEach(uid => {
+                const sid = connectedUsers.get(uid);
+                if (sid) {
+                  io.to(sid).emit('call:ended', {
+                    callId,
+                    channelName,
+                    reason: 'balance_exhausted',
+                    code: 'MAX_DURATION_REACHED'
+                  });
+                }
+              });
+
+              // Trigger billing from server as safety net
+              try {
+                await billingFinalize({ callId, durationSeconds: maxAllowedSeconds });
+                console.log(`[SOCKET] Call ${callId}: server-triggered billing completed`);
+              } catch (billingErr) {
+                console.error(`[SOCKET] Call ${callId}: server-triggered billing error:`, billingErr.message);
+              }
+
+              // Clear busy status for both parties
+              channelUsers.forEach(uid => {
+                if (busyListeners.has(uid)) {
+                  busyListeners.delete(uid);
+                  io.emit('listener_busy_status', { listenerUserId: uid, busy: false });
+                  Listener.clearBusyByUserId(uid).catch(e => console.error('[SOCKET] clearBusy timer error:', e.message));
+                }
+              });
+
+              // Clean up channel
+              activeChannels.delete(channelName);
+            }, timerMs);
+
+            // Find listener's userId from channel participants (not the caller)
+            const listenerUserId = [...channelUsers].find(uid => String(uid) !== String(callData.caller_id)) || null;
+
+            activeCallTimers.set(callId, {
+              timerId,
+              callerId: callData.caller_id,
+              listenerUserId,
+              channelName,
+              startedAt: Date.now(),
+              maxAllowedSeconds
+            });
+            console.log(`[SOCKET] Call ${callId}: auto-disconnect timer set for ${maxAllowedSeconds + 3}s`);
+          } else {
+            // Zero balance — disconnect immediately
+            console.log(`[SOCKET] Call ${callId}: zero allowed duration, disconnecting immediately`);
+            channelUsers.forEach(uid => {
+              const sid = connectedUsers.get(uid);
+              if (sid) {
+                io.to(sid).emit('call:ended', {
+                  callId,
+                  channelName,
+                  reason: 'balance_exhausted',
+                  code: 'ZERO_BALANCE'
+                });
+              }
+            });
+          }
+        } catch (err) {
+          console.error(`[SOCKET] Error in call:joined handler for call ${callId}:`, err);
+          // Still emit call:connected without max duration as fallback
+          channelUsers.forEach(uid => {
+            const sid = connectedUsers.get(uid);
+            if (sid) io.to(sid).emit('call:connected', { callId, channelName, maxAllowedSeconds: 0 });
+          });
+        } finally {
+          processingCalls.delete(String(callId));
         }
-      });
+      })();
     }
   });
 
@@ -410,6 +556,15 @@ io.on('connection', (socket) => {
   socket.on('call:end', (data) => {
     const { callId, otherUserId } = data;
     console.log(`[SOCKET] call:end: Call ${callId} ended by ${socket.userId}`);
+    
+    // Clear server-side auto-disconnect timer & capture data for safety billing
+    let endTimerData = null;
+    if (callId && activeCallTimers.has(callId)) {
+      endTimerData = activeCallTimers.get(callId);
+      clearTimeout(endTimerData.timerId);
+      activeCallTimers.delete(callId);
+      console.log(`[SOCKET] call:end: Cleared auto-disconnect timer for call ${callId}`);
+    }
     
     // BUSY: Clear busy for both parties (whichever is the listener)
     _clearBusyForCall(socket.userId, otherUserId);
@@ -438,6 +593,23 @@ io.on('connection', (socket) => {
         });
       }
       console.log(`[SOCKET] call:end: Cancelled pending call ${callId}, notified listener ${pending.listenerId}`);
+    }
+
+    // 3. Safety billing: ensure billing happens even if frontend POST /api/calls/end fails
+    //    billingFinalize is idempotent (checks call_records for existing billing)
+    if (callId && endTimerData) {
+      (async () => {
+        try {
+          const elapsed = Math.max(0, Math.round((Date.now() - endTimerData.startedAt) / 1000));
+          const billDuration = Math.min(elapsed, endTimerData.maxAllowedSeconds);
+          if (billDuration > 0) {
+            await billingFinalize({ callId, durationSeconds: billDuration });
+            console.log(`[SOCKET] call:end: Safety billing for call ${callId} (${billDuration}s)`);
+          }
+        } catch (e) {
+          console.error(`[SOCKET] call:end: Safety billing error for call ${callId}:`, e.message);
+        }
+      })();
     }
   });
 
@@ -758,6 +930,30 @@ io.on('connection', (socket) => {
     const listenerUserId = socket.listenerUserId;
 
     console.log(`[SOCKET] Disconnected: ${socket.id} (User: ${userId}, Listener: ${listenerUserId})`);
+
+    // Clear any active call timers for this user's calls (matches both caller and listener)
+    for (const [callId, timerData] of activeCallTimers.entries()) {
+      const isCaller = String(timerData.callerId) === String(userId);
+      const isListener = timerData.listenerUserId && String(timerData.listenerUserId) === String(userId);
+      if (isCaller || isListener) {
+        clearTimeout(timerData.timerId);
+        activeCallTimers.delete(callId);
+        console.log(`[SOCKET] disconnect: Cleared timer for call ${callId} (${isCaller ? 'caller' : 'listener'} disconnected)`);
+        // Trigger billing safety net for disconnected calls
+        (async () => {
+          try {
+            const elapsed = Math.max(0, Math.round((Date.now() - timerData.startedAt) / 1000));
+            const billDuration = Math.min(elapsed, timerData.maxAllowedSeconds);
+            if (billDuration > 0) {
+              await billingFinalize({ callId, durationSeconds: billDuration });
+              console.log(`[SOCKET] disconnect: Safety billing for call ${callId} (${billDuration}s)`);
+            }
+          } catch (e) {
+            console.error(`[SOCKET] disconnect: Safety billing error for call ${callId}:`, e.message);
+          }
+        })();
+      }
+    }
 
     // Handle listener cleanup
     if (listenerUserId && listenerSockets.get(listenerUserId) === socket.id) {

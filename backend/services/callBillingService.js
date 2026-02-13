@@ -36,6 +36,64 @@ const getExistingBilling = async (client, callId) => {
   return existing.rows[0] || null;
 };
 
+// Calculate maximum affordable call duration based on wallet balance
+const calculateMaxCallDuration = async (callerId, ratePerMinute) => {
+  try {
+    const walletResult = await pool.query(
+      'SELECT balance FROM wallets WHERE user_id = $1',
+      [callerId]
+    );
+
+    const balance = walletResult.rows.length > 0
+      ? Number(walletResult.rows[0].balance)
+      : 0;
+
+    const rate = Number(ratePerMinute);
+    if (rate <= 0 || balance <= 0) return { maxAllowedSeconds: 0, balance, rate };
+
+    // Pro-rata calculation: allow the full fractional time the wallet can afford
+    // e.g., ₹5 at ₹4/min = 1.25 min × 60 = 75 seconds
+    // Billing uses Math.ceil for minute rounding, but the wallet-cap in
+    // finalizeCallBilling ensures we never charge more than the wallet holds.
+    const maxAllowedSeconds = Math.max(0, Math.floor((balance / rate) * 60));
+
+    console.log(`[BILLING] maxCallDuration: user=${callerId} balance=₹${balance} rate=₹${rate}/min → ${maxAllowedSeconds}s`);
+
+    return { maxAllowedSeconds, balance, rate };
+  } catch (error) {
+    console.error(`[BILLING] calculateMaxCallDuration error:`, error);
+    return { maxAllowedSeconds: 0, balance: 0, rate: Number(ratePerMinute) };
+  }
+};
+
+// Mark call as started with server-authoritative timestamp
+const markCallStarted = async (callId) => {
+  try {
+    const result = await pool.query(
+      `UPDATE calls
+       SET status = 'ongoing', started_at = CURRENT_TIMESTAMP
+       WHERE call_id = $1 AND status IN ('pending', 'ringing')
+       RETURNING call_id, started_at, rate_per_minute, caller_id, listener_id`,
+      [callId]
+    );
+
+    if (result.rows.length === 0) {
+      // Call might already be ongoing — return existing data
+      const existing = await pool.query(
+        'SELECT call_id, started_at, rate_per_minute, caller_id, listener_id FROM calls WHERE call_id = $1',
+        [callId]
+      );
+      return existing.rows[0] || null;
+    }
+
+    console.log(`[BILLING] Call ${callId} marked as started at ${result.rows[0].started_at}`);
+    return result.rows[0];
+  } catch (error) {
+    console.error(`[BILLING] markCallStarted error for call ${callId}:`, error);
+    return null;
+  }
+};
+
 const finalizeCallBilling = async ({ callId, durationSeconds }) => {
   const client = await pool.connect();
 
@@ -54,6 +112,19 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
     }
 
     const call = callResult.rows[0];
+
+    // Server-authoritative duration: prefer started_at from DB over frontend value
+    if (call.started_at) {
+      const serverMs = Date.now() - new Date(call.started_at).getTime();
+      const serverDuration = Math.max(0, Math.round(serverMs / 1000));
+      const clientDuration = durationSeconds;
+      // Use the LESSER of server and frontend duration to prevent overcharging;
+      // server value is ground truth, but API latency can inflate it slightly
+      durationSeconds = clientDuration > 0
+        ? Math.min(serverDuration, clientDuration)
+        : serverDuration;
+      console.log(`[BILLING] Duration resolved: server=${serverDuration}s, client=${clientDuration}s → effective=${durationSeconds}s`);
+    }
 
     const existingBilling = await getExistingBilling(client, callId);
     if (existingBilling) {
@@ -130,44 +201,75 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
     // Log the billing calculation for audit trail
     console.log(`[BILLING] call=${callId} | duration=${durationSeconds}s → ${minutes}min | userRate=₹${userRate}/min → charge=₹${userCharge} | payoutRate=₹${payoutRate}/min → listenerEarn=₹${listenerEarn} | commission=₹${(userCharge - listenerEarn).toFixed(2)}`);
 
-    await fetchOrCreateWallet(client, call.caller_id);
+    // ── Wallet-capped billing ──
+    // Cap billing to wallet balance so connected calls NEVER fail with INSUFFICIENT_BALANCE.
+    // Instead of rejecting the entire transaction, bill only what the wallet can afford.
+    const wallet = await fetchOrCreateWallet(client, call.caller_id);
+    const walletBalance = Number(wallet.balance);
 
-    const walletUpdate = await client.query(
-      `UPDATE wallets
-       SET balance = balance - $2, updated_at = NOW()
-       WHERE user_id = $1 AND balance >= $2
-       RETURNING balance`,
-      [call.caller_id, userCharge]
-    );
+    let billedMinutes = minutes;
+    let billedUserCharge = userCharge;
+    let billedListenerEarn = listenerEarn;
 
-    if (walletUpdate.rows.length === 0) {
-      const error = new Error('INSUFFICIENT_BALANCE');
-      error.code = 'INSUFFICIENT_BALANCE';
-      throw error;
+    if (walletBalance < userCharge && userCharge > 0) {
+      const affordableMinutes = Math.max(0, Math.floor(walletBalance / userRate));
+      billedMinutes = affordableMinutes;
+      billedUserCharge = roundMoney(billedMinutes * userRate);
+      billedListenerEarn = roundMoney(billedMinutes * payoutRate);
+      console.log(`[BILLING] CAPPED: wallet=₹${walletBalance} < charge=₹${userCharge}. Capped to ${billedMinutes}min → user=₹${billedUserCharge}, listener=₹${billedListenerEarn}`);
     }
 
-    const updatedUserBalance = walletUpdate.rows[0].balance;
-    await client.query(
-      'UPDATE users SET wallet_balance = $2 WHERE user_id = $1',
-      [call.caller_id, updatedUserBalance]
-    );
+    // Deduct user wallet (skip if nothing to charge)
+    if (billedUserCharge > 0) {
+      const walletUpdate = await client.query(
+        `UPDATE wallets
+         SET balance = balance - $2, updated_at = NOW()
+         WHERE user_id = $1 AND balance >= $2
+         RETURNING balance`,
+        [call.caller_id, billedUserCharge]
+      );
 
-    const listenerUpdate = await client.query(
-      `UPDATE listeners
-       SET wallet_balance = wallet_balance + $2,
-           total_earning = total_earning + $2,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE listener_id = $1
-       RETURNING wallet_balance, total_earning`,
-      [call.listener_id, listenerEarn]
-    );
+      if (walletUpdate.rows.length === 0) {
+        // Race condition: another transaction deducted between our read and write
+        // Fall back to zero billing rather than failing the whole call
+        console.log(`[BILLING] WARNING: Wallet race condition for user ${call.caller_id}. Zeroing billing.`);
+        billedMinutes = 0;
+        billedUserCharge = 0;
+        billedListenerEarn = 0;
+      } else {
+        const updatedUserBalance = walletUpdate.rows[0].balance;
+        await client.query(
+          'UPDATE users SET wallet_balance = $2 WHERE user_id = $1',
+          [call.caller_id, updatedUserBalance]
+        );
 
-    if (listenerUpdate.rows.length === 0) {
-      const error = new Error('Listener wallet update failed');
-      error.code = 'LISTENER_WALLET_UPDATE_FAILED';
-      throw error;
+        // Record debit transaction for audit trail
+        await client.query(
+          `INSERT INTO transactions (user_id, transaction_type, amount, currency, description, status, related_call_id)
+           VALUES ($1, 'debit', $2, 'INR', $3, 'completed', $4)`,
+          [call.caller_id, billedUserCharge, `Call charge (${billedMinutes} min)`, callId]
+        );
+      }
     }
 
+    // Credit listener wallet (skip if nothing to credit)
+    if (billedListenerEarn > 0) {
+      const listenerUpdate = await client.query(
+        `UPDATE listeners
+         SET wallet_balance = wallet_balance + $2,
+             total_earning = total_earning + $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE listener_id = $1
+         RETURNING wallet_balance, total_earning`,
+        [call.listener_id, billedListenerEarn]
+      );
+
+      if (listenerUpdate.rows.length === 0) {
+        console.error(`[BILLING] CRITICAL: Listener ${call.listener_id} wallet update returned 0 rows. User charged ₹${billedUserCharge} but listener not credited.`);
+      }
+    }
+
+    // Update call record
     await client.query(
       `UPDATE calls
        SET status = 'completed',
@@ -177,9 +279,10 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
            rate_per_minute = $5,
            ended_at = CURRENT_TIMESTAMP
        WHERE call_id = $1`,
-      [callId, durationSeconds, minutes, userCharge, userRate]
+      [callId, durationSeconds, billedMinutes, billedUserCharge, userRate]
     );
 
+    // Create immutable billing record (unique index on call_id prevents duplicates)
     await client.query(
       `INSERT INTO call_records (
          call_id, user_id, listener_id, minutes, user_charge, listener_earn, started_at, ended_at
@@ -188,13 +291,14 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
         callId,
         call.caller_id,
         call.listener_id,
-        minutes,
-        userCharge,
-        listenerEarn,
+        billedMinutes,
+        billedUserCharge,
+        billedListenerEarn,
         call.started_at
       ]
     );
 
+    // Audit log
     await client.query(
       `INSERT INTO call_billing_audit (
          call_id, user_id, listener_id, minutes, user_charge, listener_earn, user_rate_per_min, listener_payout_per_min
@@ -203,9 +307,9 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
         callId,
         call.caller_id,
         call.listener_id,
-        minutes,
-        userCharge,
-        listenerEarn,
+        billedMinutes,
+        billedUserCharge,
+        billedListenerEarn,
         userRate,
         payoutRate
       ]
@@ -225,9 +329,9 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
 
     return {
       alreadyBilled: false,
-      minutes,
-      userCharge,
-      listenerEarn
+      minutes: billedMinutes,
+      userCharge: billedUserCharge,
+      listenerEarn: billedListenerEarn
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -237,4 +341,4 @@ const finalizeCallBilling = async ({ callId, durationSeconds }) => {
   }
 };
 
-export { calculateCallCharge, finalizeCallBilling };
+export { calculateCallCharge, finalizeCallBilling, calculateMaxCallDuration, markCallStarted };

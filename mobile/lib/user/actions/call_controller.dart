@@ -84,6 +84,14 @@ class UserCallController extends ChangeNotifier {
   bool _isCallEnding = false;
   Completer<void>? _endCallCompleter;
 
+  /// Maximum seconds the wallet can afford (sent by server)
+  int _maxAllowedSeconds = 0;
+  int get maxAllowedSeconds => _maxAllowedSeconds;
+
+  /// Remaining seconds before auto-disconnect (counts down from maxAllowedSeconds)
+  int _remainingSeconds = 0;
+  int get remainingSeconds => _remainingSeconds;
+
   /// Reason the call ended (user_end, balance_zero, remote_end, network_drop).
   String? _endReason;
   String? get endReason => _endReason;
@@ -140,11 +148,30 @@ class UserCallController extends ChangeNotifier {
   void _setupSocketListeners() {
     _callConnectedSub = _socketService.onCallConnected.listen((data) {
       debugPrint('UserCallController: socket call:connected received');
+      // Parse server-provided max allowed seconds for wallet-based auto-disconnect
+      final maxSec = data['maxAllowedSeconds'];
+      if (maxSec != null && maxSec is num && maxSec > 0) {
+        _maxAllowedSeconds = maxSec.toInt();
+        _remainingSeconds = _maxAllowedSeconds;
+        debugPrint('[CALL] Server max allowed: ${_maxAllowedSeconds}s');
+      } else {
+        debugPrint('[CALL] No maxAllowedSeconds from server, using fallback balance check');
+      }
       _transitionTo(UserCallState.connected);
     });
 
     _callEndedSub = _socketService.onCallEnded.listen((data) {
       debugPrint('UserCallController: socket call:ended – ${data['reason'] ?? 'unknown'}');
+      final reason = data['reason']?.toString() ?? 'remote_end';
+      final code = data['code']?.toString() ?? '';
+
+      // Server-initiated balance exhaustion disconnect
+      if (reason == 'balance_exhausted' || code == 'MAX_DURATION_REACHED' || code == 'ZERO_BALANCE') {
+        debugPrint('[CALL] Server: balance exhausted, auto-ending');
+        endCall(reason: 'balance_zero');
+        return;
+      }
+
       if (data['code'] == 'LISTENER_OFFLINE') {
         _setError(data['error'] ?? 'Listener is offline');
         Future.delayed(const Duration(seconds: 2), () {
@@ -500,15 +527,30 @@ class UserCallController extends ChangeNotifier {
 
   void _startCallTimer() {
     _callTimer?.cancel();
-    int _balanceCheckCounter = 0;
     _callTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (_disposed || _isCallEnding) return;
       _callDuration++;
 
-      // Check balance every 15 seconds to auto-end on zero balance
-      _balanceCheckCounter++;
-      if (_balanceCheckCounter >= 15) {
-        _balanceCheckCounter = 0;
+      // Countdown remaining seconds (server-provided wallet-based limit)
+      if (_maxAllowedSeconds > 0) {
+        _remainingSeconds = (_maxAllowedSeconds - _callDuration).clamp(0, _maxAllowedSeconds);
+
+        // Auto-disconnect when countdown reaches 0
+        if (_remainingSeconds <= 0 && !_isCallEnding) {
+          debugPrint('[CALL] Countdown reached 0 – auto-ending call (wallet limit)');
+          endCall(reason: 'balance_zero');
+          return;
+        }
+
+        // Warning at 30 seconds remaining (for UI feedback)
+        if (_remainingSeconds == 30) {
+          debugPrint('[CALL] Warning: 30 seconds remaining');
+        }
+      }
+
+      // Fallback: periodic balance check every 60 seconds
+      // Only needed when server didn't provide maxAllowedSeconds
+      if (_maxAllowedSeconds <= 0 && _callDuration % 60 == 0) {
         _checkBalanceDuringCall();
       }
 
