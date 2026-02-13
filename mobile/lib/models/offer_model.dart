@@ -6,6 +6,7 @@ class OfferModel {
   final String subtext;
   final String buttonText;
   final String countdownPrefix;
+  final String? videoUrl;
   final double minWalletBalance;
   final DateTime? expiresAt;
   final DateTime? updatedAt;
@@ -18,6 +19,7 @@ class OfferModel {
     required this.subtext,
     required this.buttonText,
     required this.countdownPrefix,
+    this.videoUrl,
     required this.minWalletBalance,
     this.expiresAt,
     this.updatedAt,
@@ -41,6 +43,7 @@ class OfferModel {
         json['countdownPrefix'] ?? json['countdown_prefix'],
         fallback: 'Offer ends in 12h',
       ),
+      videoUrl: _safeNullableString(json['videoUrl'] ?? json['video_url']),
       minWalletBalance: _safeParseDouble(
         json['minWalletBalance'] ?? json['min_wallet_balance'],
         fallback: 5,
@@ -72,6 +75,12 @@ class OfferModel {
     return text.isEmpty ? fallback : text;
   }
 
+  static String? _safeNullableString(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    return text.isEmpty ? null : text;
+  }
+
   static double _safeParseDouble(dynamic value, {double fallback = 0}) {
     if (value == null) return fallback;
     if (value is double) return value;
@@ -88,6 +97,7 @@ class OfferModel {
     'subtext': subtext,
     'buttonText': buttonText,
     'countdownPrefix': countdownPrefix,
+    'videoUrl': videoUrl,
     'minWalletBalance': minWalletBalance,
     'expiresAt': expiresAt?.toIso8601String(),
     'updatedAt': updatedAt?.toIso8601String(),

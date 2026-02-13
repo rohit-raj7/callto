@@ -414,7 +414,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const TopBar(),
-            _buildOfferBannerState(),
+            if (_offerCtrl.shouldShow)
+              Flexible(
+                flex: 0,
+                child: _buildOfferBannerState(),
+              ),
+            if (!_offerCtrl.shouldShow) _buildOfferBannerState(),
 
             // Title + Dropdown Filter
             Padding(
