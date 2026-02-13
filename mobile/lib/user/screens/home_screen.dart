@@ -62,7 +62,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadOfferEligibility();
     _loadRateConfig();
 
-    // Fetch offer banner via shared controller
+    // Show offer banner (reset dismiss + load cached + sync API)
+    _offerCtrl.resetDismiss();
     _offerCtrl.refresh();
     // Listen for state changes so we rebuild when banner data arrives
     _offerCtrl.result.addListener(_onOfferChanged);
@@ -115,6 +116,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Banner reappears every time the user returns to the app
+      _offerCtrl.resetDismiss();
       _offerCtrl.refresh();
     }
   }
@@ -282,8 +285,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await Future.wait([_loadListeners(), _offerCtrl.refresh()]);
   }
 
-  Future<void> _dismissOfferBanner() async {
-    await _offerCtrl.dismiss();
+  void _dismissOfferBanner() {
+    _offerCtrl.dismiss();
   }
 
   void _filterByTopic(String? topic) {

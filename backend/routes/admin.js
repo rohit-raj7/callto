@@ -19,11 +19,8 @@ const defaultOfferBannerConfig = {
   headline: 'Flat 25% OFF',
   subtext: 'on recharge of \u20B9100',
   buttonText: 'Recharge for \u20B975',
-  countdownPrefix: 'Offer ends in',
-  rechargeAmount: 100,
-  discountedAmount: 75,
+  countdownPrefix: 'Offer ends in 12h',
   minWalletBalance: 5,
-  startsAt: null,
   expiresAt: null,
   isActive: false,
   updatedAt: null,
@@ -36,10 +33,7 @@ const mapOfferBannerRow = (row) => ({
   subtext: row.subtext,
   buttonText: row.button_text,
   countdownPrefix: row.countdown_prefix,
-  rechargeAmount: Number(row.recharge_amount),
-  discountedAmount: Number(row.discounted_amount),
   minWalletBalance: Number(row.min_wallet_balance),
-  startsAt: row.starts_at,
   expiresAt: row.expires_at,
   isActive: row.is_active === true,
   updatedAt: row.updated_at,
@@ -739,8 +733,7 @@ router.get('/offer-banner', authenticateAdmin, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
-              recharge_amount, discounted_amount, min_wallet_balance,
-              starts_at, expires_at, is_active, updated_at
+              min_wallet_balance, expires_at, is_active, updated_at
        FROM offer_banner_config
        ORDER BY updated_at DESC
        LIMIT 1`
@@ -766,10 +759,6 @@ router.put('/offer-banner', authenticateAdmin, async (req, res) => {
       subtext,
       buttonText,
       countdownPrefix,
-      rechargeAmount,
-      discountedAmount,
-      startsAt,
-      expiresAt,
       isActive,
     } = req.body || {};
 
@@ -795,43 +784,11 @@ router.put('/offer-banner', authenticateAdmin, async (req, res) => {
       return res.status(400).json({ error: 'countdownPrefix is required' });
     }
 
-    const parsedRechargeAmount = Number(rechargeAmount);
-    const parsedDiscountedAmount = Number(discountedAmount);
-    const parsedMinWalletBalance = 5;
-
-    if (!Number.isFinite(parsedRechargeAmount) || parsedRechargeAmount <= 0) {
-      return res.status(400).json({ error: 'rechargeAmount must be a positive number' });
-    }
-    if (!Number.isFinite(parsedDiscountedAmount) || parsedDiscountedAmount <= 0) {
-      return res.status(400).json({ error: 'discountedAmount must be a positive number' });
-    }
-    if (parsedDiscountedAmount >= parsedRechargeAmount) {
-      return res.status(400).json({ error: 'discountedAmount must be lower than rechargeAmount' });
-    }
-    const hasStartsAt = startsAt !== undefined && startsAt !== null && String(startsAt).trim() !== '';
-    const parsedStartsAt = hasStartsAt ? new Date(startsAt) : null;
-    const parsedExpiresAt = new Date(expiresAt);
-
-    if (hasStartsAt && Number.isNaN(parsedStartsAt.getTime())) {
-      return res.status(400).json({ error: 'startsAt must be a valid datetime' });
-    }
-    if (Number.isNaN(parsedExpiresAt.getTime())) {
-      return res.status(400).json({ error: 'expiresAt must be a valid datetime' });
-    }
-    if (parsedStartsAt && parsedExpiresAt <= parsedStartsAt) {
-      return res.status(400).json({ error: 'expiresAt must be greater than startsAt' });
-    }
-
     const enableBanner = isActive === true;
 
-    // Auto-fix: if enabling the banner but expiresAt is in the past, extend to 7 days from now
-    let finalStartsAt = parsedStartsAt;
-    let finalExpiresAt = parsedExpiresAt;
-    if (enableBanner && finalExpiresAt <= new Date()) {
-      finalStartsAt = new Date();
-      finalExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      console.log('[admin offer-banner] Auto-extended expired dates. New startsAt:', finalStartsAt, 'expiresAt:', finalExpiresAt);
-    }
+    // Default: starts now, expires in 12 hours
+    const finalStartsAt = new Date();
+    const finalExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
 
     const client = await pool.connect();
     let saveResult;
@@ -862,17 +819,16 @@ router.put('/offer-banner', authenticateAdmin, async (req, res) => {
          )
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING config_id, title, headline, subtext, button_text, countdown_prefix,
-                   recharge_amount, discounted_amount, min_wallet_balance,
-                   starts_at, expires_at, is_active, updated_at`,
+                   min_wallet_balance, expires_at, is_active, updated_at`,
         [
           normalizedTitle,
           normalizedHeadline,
           normalizedSubtext,
           normalizedButtonText,
           normalizedCountdownPrefix,
-          parsedRechargeAmount,
-          parsedDiscountedAmount,
-          parsedMinWalletBalance,
+          0,
+          0,
+          5,
           finalStartsAt,
           finalExpiresAt,
           enableBanner,

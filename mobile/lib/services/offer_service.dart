@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/offer_model.dart';
@@ -10,13 +12,17 @@ class OfferService {
   OfferService._internal();
 
   final ApiService _api = ApiService();
-  static const String _dismissedDayPrefix = 'offer_banner_dismissed_day_';
+  static const String _cachedBannerKey = 'offer_banner_cached_data';
 
+  // ── API fetch ─────────────────────────────────────────────────────────
+
+  /// Fetch offer banner from the backend and update the local cache.
   Future<OfferFetchResult> fetchOfferBanner() async {
     final response = await _api.get(ApiConfig.userOfferBanner);
 
     if (!response.isSuccess) {
-      print('[OfferService] API call failed: ${response.error} (status: ${response.statusCode})');
+      print('[OfferService] API call failed: ${response.error} '
+          '(status: ${response.statusCode})');
       return OfferFetchResult(
         success: false,
         error: response.error ?? 'Failed to fetch offer banner',
@@ -29,16 +35,19 @@ class OfferService {
 
     final activeOffer = payload['activeOffer'] == true;
     final bannerRaw = payload['offerBanner'];
-    final walletBalance = payload['walletBalance'];
+    final walletBalance =
+        (payload['walletBalance'] as num?)?.toDouble() ?? 0;
     final reason = payload['reason'];
 
-    print('[OfferService] RAW API response: $payload');
-    print('[OfferService] activeOffer=$activeOffer, walletBalance=$walletBalance, '
-        'hasBannerData=${bannerRaw is Map}, reason=$reason');
+    print('[OfferService] API: activeOffer=$activeOffer, '
+        'walletBalance=$walletBalance, reason=$reason');
 
+    // Banner not eligible (wallet sufficient or no active config)
     if (!activeOffer || bannerRaw is! Map) {
-      print('[OfferService] Banner not eligible: activeOffer=$activeOffer, '
-          'reason=$reason, bannerRaw type=${bannerRaw.runtimeType}');
+      // Update cached wallet balance so stale cache won't show banner
+      if (reason == 'wallet_sufficient') {
+        await _updateCachedWalletBalance(walletBalance);
+      }
       return OfferFetchResult(
         success: true,
         shouldShowBanner: false,
@@ -46,63 +55,101 @@ class OfferService {
       );
     }
 
-    final offer = OfferModel.fromJson(Map<String, dynamic>.from(bannerRaw));
-    final dismissedToday = await isDismissedForToday(offer.offerId);
-    // Backend already enforces active flag + time window + wallet eligibility.
-    final shouldShow = activeOffer && !dismissedToday;
+    final offer =
+        OfferModel.fromJson(Map<String, dynamic>.from(bannerRaw));
 
-    print('[OfferService] offerId=${offer.offerId}, dismissedToday=$dismissedToday, shouldShow=$shouldShow, expiresAt=${offer.expiresAt}');
+    // Cache banner + wallet balance for offline / instant display
+    await _cacheBannerData(offer, walletBalance);
+
+    print('[OfferService] offerId=${offer.offerId}, shouldShow=true, '
+        'expiresAt=${offer.expiresAt}');
 
     return OfferFetchResult(
       success: true,
       offer: offer,
-      shouldShowBanner: shouldShow,
-      dismissedToday: dismissedToday,
+      shouldShowBanner: true,
     );
   }
 
-  Future<void> dismissOfferForToday(String offerId) async {
-    if (offerId.trim().isEmpty) return;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('$_dismissedDayPrefix$offerId', _todayKey());
-  }
+  // ── Local cache ───────────────────────────────────────────────────────
 
-  Future<bool> isDismissedForToday(String offerId) async {
-    if (offerId.trim().isEmpty) return false;
-    final prefs = await SharedPreferences.getInstance();
-    final key = '$_dismissedDayPrefix$offerId';
-    final storedDay = prefs.getString(key);
-    if (storedDay == null) return false;
+  /// Load previously cached offer banner (no network call).
+  Future<OfferFetchResult?> loadCachedOffer() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cachedBannerKey);
+      if (raw == null) return null;
 
-    final today = _todayKey();
-    if (storedDay == today) {
-      return true;
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      final offerJson = data['offer'] as Map<String, dynamic>;
+      final walletBalance =
+          (data['walletBalance'] as num?)?.toDouble() ?? 0;
+      final offer = OfferModel.fromJson(offerJson);
+
+      // Don't show an expired or inactive cached banner
+      if (offer.hasExpired || !offer.isActive) {
+        print('[OfferService] Cached banner expired / inactive – clearing');
+        await prefs.remove(_cachedBannerKey);
+        return null;
+      }
+
+      final shouldShow = walletBalance < offer.minWalletBalance;
+
+      print('[OfferService] Cache: offerId=${offer.offerId}, '
+          'wallet=$walletBalance, min=${offer.minWalletBalance}, '
+          'shouldShow=$shouldShow');
+
+      return OfferFetchResult(
+        success: true,
+        offer: offer,
+        shouldShowBanner: shouldShow,
+      );
+    } catch (e) {
+      print('[OfferService] Cache load error: $e');
+      return null;
     }
-
-    await prefs.remove(key);
-    return false;
   }
 
-  String _todayKey() {
-    final now = DateTime.now();
-    final month = now.month.toString().padLeft(2, '0');
-    final day = now.day.toString().padLeft(2, '0');
-    return '${now.year}-$month-$day';
+  /// Save offer + wallet balance to SharedPreferences.
+  Future<void> _cacheBannerData(
+      OfferModel offer, double walletBalance) async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = {
+      'offer': offer.toJson(),
+      'walletBalance': walletBalance,
+      'cachedAt': DateTime.now().toIso8601String(),
+    };
+    await prefs.setString(_cachedBannerKey, jsonEncode(data));
+    print('[OfferService] Cached banner: offerId=${offer.offerId}');
+  }
+
+  /// Update only the wallet balance inside the existing cache so that a
+  /// "wallet_sufficient" API response correctly suppresses the cached banner.
+  Future<void> _updateCachedWalletBalance(double walletBalance) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_cachedBannerKey);
+    if (raw == null) return;
+    try {
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      data['walletBalance'] = walletBalance;
+      await prefs.setString(_cachedBannerKey, jsonEncode(data));
+      print('[OfferService] Updated cached wallet balance: $walletBalance');
+    } catch (_) {}
   }
 }
+
+// ── Result model ──────────────────────────────────────────────────────────
 
 class OfferFetchResult {
   final bool success;
   final OfferModel? offer;
   final bool shouldShowBanner;
-  final bool dismissedToday;
   final String? error;
 
   const OfferFetchResult({
     required this.success,
     this.offer,
     this.shouldShowBanner = false,
-    this.dismissedToday = false,
     this.error,
   });
 }

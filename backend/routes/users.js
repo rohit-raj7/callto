@@ -160,8 +160,7 @@ router.get('/offer-banner', authenticate, async (req, res) => {
       // 1) Try to find an active, non-expired banner
       pool.query(
         `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
-                recharge_amount, discounted_amount, min_wallet_balance,
-                starts_at, expires_at, is_active, updated_at
+                min_wallet_balance, expires_at, is_active, updated_at
          FROM offer_banner_config
          WHERE is_active = TRUE
            AND (starts_at IS NULL OR starts_at <= CURRENT_TIMESTAMP)
@@ -172,8 +171,7 @@ router.get('/offer-banner', authenticate, async (req, res) => {
       // 2) Also fetch any active banner (even if expired) for auto-extend
       pool.query(
         `SELECT config_id, title, headline, subtext, button_text, countdown_prefix,
-                recharge_amount, discounted_amount, min_wallet_balance,
-                starts_at, expires_at, is_active, updated_at
+                min_wallet_balance, expires_at, is_active, updated_at
          FROM offer_banner_config
          WHERE is_active = TRUE
          ORDER BY updated_at DESC
@@ -184,11 +182,11 @@ router.get('/offer-banner', authenticate, async (req, res) => {
     const walletBalance = Number(walletResult.rows[0]?.balance ?? 0);
     let activeBanner = activeNonExpiredResult.rows[0];
 
-    // Auto-extend: if there's an active banner but it's expired, extend it by 7 days
+    // Auto-extend: if there's an active banner but it's expired, extend by 12 hours
     if (!activeBanner && activeAnyResult.rows[0]) {
       const expiredBanner = activeAnyResult.rows[0];
       const newStartsAt = new Date();
-      const newExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const newExpiresAt = new Date(Date.now() + 12 * 60 * 60 * 1000);
 
       console.log('[offer-banner] Auto-extending expired active banner:', expiredBanner.config_id,
         'old expires_at:', expiredBanner.expires_at, '-> new expires_at:', newExpiresAt);
@@ -198,8 +196,7 @@ router.get('/offer-banner', authenticate, async (req, res) => {
          SET starts_at = $1, expires_at = $2, updated_at = CURRENT_TIMESTAMP
          WHERE config_id = $3
          RETURNING config_id, title, headline, subtext, button_text, countdown_prefix,
-                   recharge_amount, discounted_amount, min_wallet_balance,
-                   starts_at, expires_at, is_active, updated_at`,
+                   min_wallet_balance, expires_at, is_active, updated_at`,
         [newStartsAt, newExpiresAt, expiredBanner.config_id]
       );
       activeBanner = updated.rows[0] || null;
@@ -237,9 +234,6 @@ router.get('/offer-banner', authenticate, async (req, res) => {
         subtext: activeBanner.subtext,
         buttonText: activeBanner.button_text,
         countdownPrefix: activeBanner.countdown_prefix,
-        rechargeAmount: Number(activeBanner.recharge_amount),
-        discountedAmount: Number(activeBanner.discounted_amount),
-        startsAt: activeBanner.starts_at,
         expiresAt: activeBanner.expires_at,
         isActive: activeBanner.is_active === true,
         updatedAt: activeBanner.updated_at,

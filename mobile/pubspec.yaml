@@ -31,6 +31,7 @@ dependencies:
   flutter_dotenv: ^5.1.0
   open_filex: ^4.7.0
   share_plus: ^10.1.4
+  youtube_player_iframe: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -105,3 +106,4 @@ flutter:
     - assets/images/male_profile/avatar16.jpg 
     - assets/images/male_profile/avatar17.jpg 
     - assets/images/male_profile/avatar18.jpg 
+

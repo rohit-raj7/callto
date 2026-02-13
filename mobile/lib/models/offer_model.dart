@@ -6,10 +6,7 @@ class OfferModel {
   final String subtext;
   final String buttonText;
   final String countdownPrefix;
-  final double rechargeAmount;
-  final double discountedAmount;
   final double minWalletBalance;
-  final DateTime? startsAt;
   final DateTime? expiresAt;
   final DateTime? updatedAt;
 
@@ -21,10 +18,7 @@ class OfferModel {
     required this.subtext,
     required this.buttonText,
     required this.countdownPrefix,
-    required this.rechargeAmount,
-    required this.discountedAmount,
     required this.minWalletBalance,
-    this.startsAt,
     this.expiresAt,
     this.updatedAt,
   });
@@ -45,19 +39,12 @@ class OfferModel {
       ),
       countdownPrefix: _safeString(
         json['countdownPrefix'] ?? json['countdown_prefix'],
-        fallback: 'Offer ends in',
-      ),
-      rechargeAmount: _safeParseDouble(
-        json['rechargeAmount'] ?? json['recharge_amount'],
-      ),
-      discountedAmount: _safeParseDouble(
-        json['discountedAmount'] ?? json['discounted_amount'],
+        fallback: 'Offer ends in 12h',
       ),
       minWalletBalance: _safeParseDouble(
         json['minWalletBalance'] ?? json['min_wallet_balance'],
         fallback: 5,
       ),
-      startsAt: _safeParseDate(json['startsAt'] ?? json['starts_at']),
       expiresAt: _safeParseDate(json['expiresAt'] ?? json['expires_at']),
       updatedAt: _safeParseDate(json['updatedAt'] ?? json['updated_at']),
     );
@@ -69,13 +56,7 @@ class OfferModel {
     return DateTime.now().isAfter(end);
   }
 
-  bool get hasStarted {
-    final start = startsAt;
-    if (start == null) return true;
-    return !DateTime.now().isBefore(start);
-  }
-
-  bool get isLiveNow => isActive && hasStarted && !hasExpired;
+  bool get isLiveNow => isActive && !hasExpired;
 
   Duration get remainingDuration {
     final end = expiresAt;
@@ -98,6 +79,19 @@ class OfferModel {
     if (value is String) return double.tryParse(value) ?? fallback;
     return fallback;
   }
+
+  Map<String, dynamic> toJson() => {
+    'offerId': offerId,
+    'isActive': isActive,
+    'title': title,
+    'headline': headline,
+    'subtext': subtext,
+    'buttonText': buttonText,
+    'countdownPrefix': countdownPrefix,
+    'minWalletBalance': minWalletBalance,
+    'expiresAt': expiresAt?.toIso8601String(),
+    'updatedAt': updatedAt?.toIso8601String(),
+  };
 
   static DateTime? _safeParseDate(dynamic value) {
     if (value == null) return null;

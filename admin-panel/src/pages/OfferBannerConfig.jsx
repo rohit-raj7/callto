@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Clock3, Save, Percent } from 'lucide-react';
 import { getOfferBannerConfig, updateOfferBannerConfig } from '../services/api';
@@ -8,27 +8,8 @@ const defaultForm = {
   headline: 'Flat 25% OFF',
   subtext: 'on recharge of INR 100',
   buttonText: 'Recharge for INR 75',
-  countdownPrefix: 'Offer ends in',
-  rechargeAmount: '100',
-  discountedAmount: '75',
-  startsAt: '',
-  expiresAt: '',
+  countdownPrefix: 'Offer ends in 12h',
   isActive: false,
-};
-
-const toDateTimeLocalValue = (value) => {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const tzOffsetMs = date.getTimezoneOffset() * 60 * 1000;
-  return new Date(date.getTime() - tzOffsetMs).toISOString().slice(0, 16);
-};
-
-const toIsoOrNull = (value) => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString();
 };
 
 const OfferBannerConfig = () => {
@@ -50,10 +31,6 @@ const OfferBannerConfig = () => {
             subtext: config.subtext ?? defaultForm.subtext,
             buttonText: config.buttonText ?? defaultForm.buttonText,
             countdownPrefix: config.countdownPrefix ?? defaultForm.countdownPrefix,
-            rechargeAmount: String(config.rechargeAmount ?? defaultForm.rechargeAmount),
-            discountedAmount: String(config.discountedAmount ?? defaultForm.discountedAmount),
-            startsAt: toDateTimeLocalValue(config.startsAt),
-            expiresAt: toDateTimeLocalValue(config.expiresAt),
             isActive: config.isActive === true,
           });
           setUpdatedAt(config.updatedAt || null);
@@ -68,25 +45,12 @@ const OfferBannerConfig = () => {
     loadConfig();
   }, []);
 
-  const savingsAmount = useMemo(() => {
-    const rechargeAmount = Number(form.rechargeAmount);
-    const discountedAmount = Number(form.discountedAmount);
-    if (!Number.isFinite(rechargeAmount) || !Number.isFinite(discountedAmount)) {
-      return null;
-    }
-    const amount = rechargeAmount - discountedAmount;
-    return amount > 0 ? amount : 0;
-  }, [form.rechargeAmount, form.discountedAmount]);
-
   const handleInputChange = (field) => (event) => {
     const value = event.target.value;
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const saveOfferBanner = async ({ activeValue, successMessage, overrideStartsAt, overrideExpiresAt }) => {
-    const rechargeAmount = Number(form.rechargeAmount);
-    const discountedAmount = Number(form.discountedAmount);
-
+  const saveOfferBanner = async ({ activeValue, successMessage }) => {
     if (!form.title.trim()) {
       toast.error('Title is required');
       return;
@@ -107,34 +71,6 @@ const OfferBannerConfig = () => {
       toast.error('Countdown prefix is required');
       return;
     }
-    if (!Number.isFinite(rechargeAmount) || rechargeAmount <= 0) {
-      toast.error('Recharge amount must be a positive number');
-      return;
-    }
-    if (!Number.isFinite(discountedAmount) || discountedAmount <= 0) {
-      toast.error('Discounted amount must be a positive number');
-      return;
-    }
-    if (discountedAmount >= rechargeAmount) {
-      toast.error('Discounted amount must be lower than recharge amount');
-      return;
-    }
-    const effectiveStartsAt = overrideStartsAt !== undefined ? overrideStartsAt : form.startsAt;
-    const effectiveExpiresAt = overrideExpiresAt !== undefined ? overrideExpiresAt : form.expiresAt;
-    const startsAtIso = toIsoOrNull(effectiveStartsAt);
-    const expiresAtIso = toIsoOrNull(effectiveExpiresAt);
-    if (!expiresAtIso) {
-      toast.error('Offer expiry date and time is required');
-      return;
-    }
-    if (effectiveStartsAt && !startsAtIso) {
-      toast.error('Start date/time is invalid');
-      return;
-    }
-    if (startsAtIso && new Date(expiresAtIso) <= new Date(startsAtIso)) {
-      toast.error('Expiry date/time must be greater than start date/time');
-      return;
-    }
 
     try {
       setSaving(true);
@@ -144,11 +80,6 @@ const OfferBannerConfig = () => {
         subtext: form.subtext.trim(),
         buttonText: form.buttonText.trim(),
         countdownPrefix: form.countdownPrefix.trim(),
-        rechargeAmount,
-        discountedAmount,
-        minWalletBalance: 5,
-        startsAt: startsAtIso,
-        expiresAt: expiresAtIso,
         isActive: activeValue,
       });
 
@@ -157,8 +88,6 @@ const OfferBannerConfig = () => {
         setUpdatedAt(updated.updatedAt || null);
         setForm((prev) => ({
           ...prev,
-          startsAt: toDateTimeLocalValue(updated.startsAt),
-          expiresAt: toDateTimeLocalValue(updated.expiresAt),
           isActive: updated.isActive === true,
         }));
       }
@@ -176,36 +105,11 @@ const OfferBannerConfig = () => {
   const handleToggle = async () => {
     if (loading || saving) return;
     const nextValue = !form.isActive;
-
-    // When enabling the banner, auto-extend expiresAt if it's in the past
-    let newStartsAt;
-    let newExpiresAt;
-    if (nextValue) {
-      const currentExpiry = form.expiresAt ? new Date(form.expiresAt) : null;
-      if (!currentExpiry || Number.isNaN(currentExpiry.getTime()) || currentExpiry <= new Date()) {
-        const extendedExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // +7 days
-        const now = new Date();
-        newStartsAt = toDateTimeLocalValue(now.toISOString());
-        newExpiresAt = toDateTimeLocalValue(extendedExpiry.toISOString());
-        setForm((prev) => ({
-          ...prev,
-          isActive: nextValue,
-          expiresAt: newExpiresAt,
-          startsAt: newStartsAt,
-        }));
-        toast('Expiry was in the past — auto-extended to 7 days from now', { icon: 'ℹ️' });
-      } else {
-        setForm((prev) => ({ ...prev, isActive: nextValue }));
-      }
-    } else {
-      setForm((prev) => ({ ...prev, isActive: nextValue }));
-    }
+    setForm((prev) => ({ ...prev, isActive: nextValue }));
 
     const success = await saveOfferBanner({
       activeValue: nextValue,
-      successMessage: nextValue ? 'Banner enabled' : 'Banner disabled',
-      ...(newStartsAt !== undefined && { overrideStartsAt: newStartsAt }),
-      ...(newExpiresAt !== undefined && { overrideExpiresAt: newExpiresAt }),
+      successMessage: nextValue ? 'Banner enabled (expires in 12 hours)' : 'Banner disabled',
     });
 
     if (!success) {
@@ -314,56 +218,10 @@ const OfferBannerConfig = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recharge Amount (INR)</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  value={form.rechargeAmount}
-                  onChange={handleInputChange('rechargeAmount')}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 py-2 text-gray-900 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Discounted Amount (INR)</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="0.01"
-                  value={form.discountedAmount}
-                  onChange={handleInputChange('discountedAmount')}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 py-2 text-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Starts At (optional)</label>
-                <input
-                  type="datetime-local"
-                  value={form.startsAt}
-                  onChange={handleInputChange('startsAt')}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 py-2 text-gray-900 dark:text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Expires At</label>
-                <input
-                  type="datetime-local"
-                  value={form.expiresAt}
-                  onChange={handleInputChange('expiresAt')}
-                  className="w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-transparent px-3 py-2 text-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-
             <div className="rounded-xl p-5 bg-gradient-to-r from-orange-500 to-pink-500 text-white shadow-lg">
               <div className="flex items-center gap-2 text-sm font-semibold mb-3 bg-white/20 w-fit rounded-full px-3 py-1">
                 <Clock3 className="w-4 h-4" />
-                <span>{form.countdownPrefix || 'Offer ends in'} 09:36:55</span>
+                <span>{form.countdownPrefix || 'Offer ends in 12h'} 05:36:55</span>
               </div>
               <p className="text-sm opacity-90">{form.title || 'Limited Time Offer'}</p>
               <p className="text-3xl font-bold mt-1">{form.headline || 'Flat 25% OFF'}</p>
@@ -374,11 +232,9 @@ const OfferBannerConfig = () => {
               >
                 {form.buttonText || 'Recharge for INR 75'}
               </button>
-              {savingsAmount !== null && (
-                <p className="text-xs mt-3 opacity-90">
-                  User saves INR {savingsAmount.toFixed(2)} on this recharge.
-                </p>
-              )}
+              <p className="text-xs mt-3 opacity-90">
+                Offer auto-expires 12 hours after enabling.
+              </p>
             </div>
 
             <div className="flex items-center justify-between">

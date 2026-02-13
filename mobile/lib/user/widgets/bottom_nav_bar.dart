@@ -50,8 +50,9 @@ class _BottomNavBarState extends State<BottomNavBar> {
           setState(() {
             _currentIndex = index;
           });
-          // Refresh offer banner when Call tab (index 0) is tapped
+          // Banner reappears every time the user switches to Call tab
           if (index == 0) {
+            _offerCtrl.resetDismiss();
             _offerCtrl.refresh();
           }
         },
