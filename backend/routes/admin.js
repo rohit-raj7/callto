@@ -84,7 +84,7 @@ router.post('/google-login', async (req, res) => {
     }
 
     // Check if email matches the admin email
-    if (userInfo.email !== 'calltoofficials@gmail.com') {
+    if (userInfo.email !== 'calltoofficials@gmail.com' || userInfo.email !== 'appdostofficial@gmail.com' ) {
       return res.status(401).json({ error: 'Unauthorized: Not an admin email' });
     }
 
