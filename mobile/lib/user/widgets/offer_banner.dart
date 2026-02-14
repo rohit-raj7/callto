@@ -25,7 +25,7 @@ class OfferBanner extends StatefulWidget {
 class _OfferBannerState extends State<OfferBanner> {
   /// Default Cloudinary video URL
   static const String _defaultVideoUrl =
-      'https://res.cloudinary.com/dxxwkuqwc/video/upload/Create_a_highquality_1080p_202602132123_kho41v.mp4';
+      'https://player.cloudinary.com/embed/?cloud_name=dxxwkuqwc&public_id=WhatsApp_Video_2026-02-14_at_10.23.28_AM_mbp3g9';
 
   Timer? _ticker;
   Duration _remainingDuration = Duration.zero;

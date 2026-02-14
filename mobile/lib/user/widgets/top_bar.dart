@@ -38,8 +38,7 @@ class _TopBarState extends State<TopBar> {
       clipper: BottomCurveClipper(),
       child: Container(
         width: double.infinity,
-        // color: Colors.pinkAccent,
-
+        // color: Colors.pinkAccent, 
         color: const Color.fromARGB(255, 235, 155, 238),
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 25),
         child: Column(

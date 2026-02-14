@@ -301,13 +301,27 @@ class _TransactionScreenState extends State<TransactionScreen> {
     return null;
   }
 
-  String _buildMetaText(DateTime utcDate, String transactionId) {
+  /// Whether a transaction is a call charge (debit with call-related data)
+  bool _isCallCharge(Map<String, dynamic> txn) {
+    final type = _pickString(txn, [
+      'transaction_type',
+      'type',
+      'direction',
+      'entry_type',
+    ]).toLowerCase();
+    final description = _pickString(txn, ['description', 'title', 'note']).toLowerCase();
+    final hasCallId = _pickString(txn, ['related_call_id', 'call_id']).isNotEmpty;
+    return (type == 'debit' && (description.contains('call charge') || hasCallId));
+  }
+
+  String _buildMetaText(DateTime utcDate, String transactionId, {bool hideTransactionId = false}) {
     if (utcDate.millisecondsSinceEpoch == 0 || utcDate.year == 1970) {
-      return 'Txn ID: $transactionId';
+      return hideTransactionId ? '' : 'Txn ID: $transactionId';
     }
 
     final ist = _toIST(utcDate);
     final formatted = DateFormat('dd MMM yyyy, hh:mm a').format(ist);
+    if (hideTransactionId) return formatted;
     return '$formatted | Txn ID: $transactionId';
   }
 
@@ -386,7 +400,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
                 child: ElevatedButton(
                   onPressed: () => Navigator.pop(context),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2962D8),
+                    backgroundColor: Colors.pink,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -405,7 +419,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF2F3FB),
+      backgroundColor: const Color(0xFFFCE4EC),
       appBar: AppBar(
         backgroundColor: const Color(0xFFF7DCE5),
         surfaceTintColor: const Color(0xFFF7DCE5),
@@ -424,7 +438,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFFF8E7EE), Color(0xFFECEFFF)],
+            colors: [Color(0xFFFDEFEF), Color(0xFFF8E1F4)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -457,7 +471,7 @@ class _TransactionScreenState extends State<TransactionScreen> {
               ElevatedButton(
                 onPressed: _loadTransactions,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2962D8),
+                  backgroundColor: Colors.pink,
                   foregroundColor: Colors.white,
                 ),
                 child: const Text('Retry'),
@@ -501,7 +515,9 @@ class _TransactionScreenState extends State<TransactionScreen> {
           final bonusText = isCredit ? _extractBonusText(txn) : null;
           final txnId = _transactionId(txn);
           final date = _extractDate(txn);
-          final metaText = _buildMetaText(date, txnId);
+          final isCallChargeTxn = _isCallCharge(txn);
+          final isWalletRechargeTxn = isCredit && title.toLowerCase().contains('recharge');
+          final metaText = _buildMetaText(date, txnId, hideTransactionId: !isWalletRechargeTxn);
 
           return _TransactionCard(
             title: title,
@@ -511,6 +527,8 @@ class _TransactionScreenState extends State<TransactionScreen> {
             amountColor: isCredit
                 ? const Color(0xFF1FA647)
                 : const Color(0xFF1E1E1E),
+            isCallCharge: isCallChargeTxn,
+            isWalletRecharge: isWalletRechargeTxn,
             onCopyId: () => _copyTransactionId(txnId),
             onInvoice: () => _openInvoice(txn, title, isCredit, amount),
             onHelp: () => _showHelpSheet(txn),
@@ -527,6 +545,8 @@ class _TransactionCard extends StatelessWidget {
   final String metaText;
   final String amountText;
   final Color amountColor;
+  final bool isCallCharge;
+  final bool isWalletRecharge;
   final VoidCallback onCopyId;
   final VoidCallback onInvoice;
   final VoidCallback onHelp;
@@ -537,6 +557,8 @@ class _TransactionCard extends StatelessWidget {
     required this.metaText,
     required this.amountText,
     required this.amountColor,
+    this.isCallCharge = false,
+    this.isWalletRecharge = false,
     required this.onCopyId,
     required this.onInvoice,
     required this.onHelp,
@@ -577,7 +599,7 @@ class _TransactionCard extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF3A63B8),
+                              color: Color(0xFF880E4F),
                             ),
                           ),
                           if (bonusText != null)
@@ -606,73 +628,78 @@ class _TransactionCard extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        metaText,
-                        style: const TextStyle(
-                          color: Color(0xFF676767),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                if (metaText.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          metaText,
+                          style: const TextStyle(
+                            color: Color(0xFF676767),
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
                       ),
-                    ),
-                    IconButton(
-                      visualDensity: VisualDensity.compact,
-                      splashRadius: 18,
-                      iconSize: 20,
-                      onPressed: onCopyId,
-                      icon: const Icon(
-                        Icons.copy_rounded,
-                        color: Color(0xFF666666),
-                      ),
-                    ),
-                  ],
-                ),
+                      if (isWalletRecharge)
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          splashRadius: 18,
+                          iconSize: 20,
+                          onPressed: onCopyId,
+                          icon: const Icon(
+                            Icons.copy_rounded,
+                            color: Color(0xFF666666),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
-          const Divider(height: 1, color: Color(0xFFE9E9E9)),
-          SizedBox(
-            height: 48,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: onInvoice,
-                    icon: const Icon(Icons.download_rounded, size: 20),
-                    label: const Text('Invoice'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF2E63D8),
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.only(
-                          bottomLeft: Radius.circular(18),
+          if (isWalletRecharge) ...[
+            const Divider(height: 1, color: Color(0xFFE9E9E9)),
+            SizedBox(
+              height: 48,
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: onInvoice,
+                      icon: const Icon(Icons.download_rounded, size: 20),
+                      label: const Text('Invoice'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFD81B60),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(
+                            bottomLeft: Radius.circular(18),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                Container(width: 1, color: const Color(0xFFE9E9E9)),
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: onHelp,
-                    icon: const Icon(Icons.headset_mic_outlined, size: 20),
-                    label: const Text('Help'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF3B3B3B),
-                      shape: const RoundedRectangleBorder(
-                        borderRadius: BorderRadius.only(
-                          bottomRight: Radius.circular(18),
+                  Container(width: 1, color: const Color(0xFFE9E9E9)),
+                  Expanded(
+                    child: TextButton.icon(
+                      onPressed: onHelp,
+                      icon: const Icon(Icons.headset_mic_outlined, size: 20),
+                      label: const Text('Help'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF3B3B3B),
+                        shape: const RoundedRectangleBorder(
+                          borderRadius: BorderRadius.only(
+                            bottomRight: Radius.circular(18),
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
