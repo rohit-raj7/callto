@@ -63,7 +63,7 @@ class ErrorBoundary extends React.Component {
                 <span>Try Again</span>
               </button>
               <button
-                onClick={() => window.location.href = '/admin/dashboard'}
+                onClick={() => window.location.href = '/admin-no-all-call/dashboard'}
                 className="flex-1 px-4 py-3 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg font-semibold transition-colors"
               >
                 Go Home

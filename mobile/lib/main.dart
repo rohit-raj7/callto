@@ -476,6 +476,9 @@ class _SplashScreenState extends State<SplashScreen> {
     final listenerComplete = await _storageService.getListenerProfileComplete();
     final userComplete = await _storageService.getUserProfileComplete();
 
+    // Check backend user object directly for completed profile
+    final backendProfileComplete = user != null && user.hasCompleteProfile;
+
     if (listenerComplete || user?.accountType == 'listener') {
       await _storageService.saveIsListener(true);
       await _maybeRefreshListenerProfile(user);
@@ -487,8 +490,9 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    if (userComplete) {
+    if (userComplete || backendProfileComplete) {
       await _storageService.saveIsListener(false);
+      await _storageService.saveUserProfileComplete(true);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -497,7 +501,10 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    if (gender == 'Female') {
+    // Use backend gender if local is missing
+    final effectiveGender = gender ?? user?.gender;
+
+    if (effectiveGender == 'Female') {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -506,7 +513,7 @@ class _SplashScreenState extends State<SplashScreen> {
       return;
     }
 
-    if (gender == 'Male') {
+    if (effectiveGender == 'Male') {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

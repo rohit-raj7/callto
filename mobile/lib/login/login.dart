@@ -6,6 +6,7 @@ import '../terms_condition/privacy_policy.dart';
 import '../gender/gender_selection.dart';
 import '../services/auth_service.dart';
 import '../services/storage_service.dart';
+import '../models/user_model.dart';
 import '../user/widgets/bottom_nav_bar.dart' as user_bottom_nav_bar;
 import '../listener/widgets/bottom_nav_bar.dart' as listener_bottom_nav_bar;
 import '../user/user_form/intro_screen.dart';
@@ -233,18 +234,28 @@ class _LoginScreenState extends State with TickerProviderStateMixin {
       return;
     }
 
+    // For existing users, try refreshing from backend first
+    User? userForRouting = result.user;
     try {
       final refreshed = await _authService.refreshUserData();
-      await _routeByProfileState(refreshed?.accountType ?? result.user?.accountType);
+      if (refreshed != null) {
+        userForRouting = refreshed;
+      }
     } catch (e) {
-      await _routeByProfileState(result.user?.accountType);
+      // If refresh fails, use the user data from login response
+      print('Failed to refresh user data after login: $e');
     }
+    await _routeByProfileState(userForRouting);
   }
 
-  Future<void> _routeByProfileState(String? accountType) async {
+  Future<void> _routeByProfileState(User? user) async {
+    final accountType = user?.accountType;
     final gender = await _storageService.getGender();
     final listenerComplete = await _storageService.getListenerProfileComplete();
     final userComplete = await _storageService.getUserProfileComplete();
+
+    // Check backend user object directly for completed profile
+    final backendProfileComplete = user != null && user.hasCompleteProfile;
 
     if (listenerComplete || accountType == 'listener') {
       await _storageService.saveIsListener(true);
@@ -257,8 +268,9 @@ class _LoginScreenState extends State with TickerProviderStateMixin {
       return;
     }
 
-    if (userComplete) {
+    if (userComplete || backendProfileComplete) {
       await _storageService.saveIsListener(false);
+      await _storageService.saveUserProfileComplete(true);
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -268,7 +280,10 @@ class _LoginScreenState extends State with TickerProviderStateMixin {
       return;
     }
 
-    if (gender == 'Female') {
+    // Use backend gender if local is missing
+    final effectiveGender = gender ?? user?.gender;
+
+    if (effectiveGender == 'Female') {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
@@ -277,7 +292,7 @@ class _LoginScreenState extends State with TickerProviderStateMixin {
       return;
     }
 
-    if (gender == 'Male') {
+    if (effectiveGender == 'Male') {
       if (!mounted) return;
       Navigator.pushReplacement(
         context,

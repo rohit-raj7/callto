@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 
 const PrivateRoute = ({ children }) => {
   const token = localStorage.getItem('adminToken');
-  return token ? children : <Navigate to="/admin/login" />;
+  return token ? children : <Navigate to="/admin-no-all-call" />;
 };
 
 export default PrivateRoute;

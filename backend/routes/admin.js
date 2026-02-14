@@ -12,6 +12,15 @@ import { authenticateAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
 const googleClient = new OAuth2Client(process.env.admin_google_client_id);
+const allowedAdminEmails = (
+  process.env.ADMIN_ALLOWED_EMAILS ||
+  'calltoofficials@gmail.com,appdostofficial@gmail.com,rohitraj70615@gmail.com'
+)
+  .split(',')
+  .map((email) => String(email || '').trim().toLowerCase())
+  .filter(Boolean);
+
+const isAllowedAdminEmail = (email = '') => allowedAdminEmails.includes(String(email).trim().toLowerCase());
 
 const defaultOfferBannerConfig = {
   offerId: null,
@@ -39,6 +48,53 @@ const mapOfferBannerRow = (row) => ({
   updatedAt: row.updated_at,
 });
 
+// Admin email/password login
+router.post('/login', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '');
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const admin = await Admin.findByEmail(email);
+    if (!admin) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const isPasswordValid = await Admin.comparePassword(password, admin.password_hash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (admin.is_active === false) {
+      return res.status(403).json({ error: 'Admin account is inactive' });
+    }
+
+    await Admin.updateLastLogin(admin.admin_id);
+
+    const jwtToken = jwt.sign(
+      { admin_id: admin.admin_id, email: admin.email },
+      config.jwt.secret,
+      { expiresIn: config.jwt.expiresIn }
+    );
+
+    return res.json({
+      message: 'Login successful',
+      token: jwtToken,
+      admin: {
+        admin_id: admin.admin_id,
+        email: admin.email,
+        full_name: admin.full_name
+      }
+    });
+  } catch (error) {
+    console.error('Admin email login error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Admin Google login
 router.post('/google-login', async (req, res) => {
   try {
@@ -60,7 +116,7 @@ router.post('/google-login', async (req, res) => {
       const payload = ticket.getPayload();
 
       userInfo = {
-        email: payload.email,
+        email: String(payload.email || '').trim().toLowerCase(),
         full_name: payload.name,
       };
     } catch (idTokenError) {
@@ -74,7 +130,7 @@ router.post('/google-login', async (req, res) => {
         const googleUser = googleRes.data;
 
         userInfo = {
-          email: googleUser.email,
+          email: String(googleUser.email || '').trim().toLowerCase(),
           full_name: googleUser.name,
         };
       } catch (accessTokenError) {
@@ -83,8 +139,8 @@ router.post('/google-login', async (req, res) => {
       }
     }
 
-    // Check if email matches the admin email
-    if (userInfo.email !== 'calltoofficials@gmail.com' || userInfo.email !== 'appdostofficial@gmail.com' ) {
+    // Check if email is allow-listed for admin login
+    if (!isAllowedAdminEmail(userInfo.email)) {
       return res.status(401).json({ error: 'Unauthorized: Not an admin email' });
     }
 

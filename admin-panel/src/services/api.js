@@ -11,13 +11,19 @@ const localFallbacks = [
 ];
 const fallbackBases = [resolvedBase, ...localFallbacks.filter((b) => b !== resolvedBase)];
 const api = axios.create({ baseURL: resolvedBase });
+const isUsableToken = (token) => {
+  const normalized = String(token || '').trim();
+  return Boolean(normalized) && normalized !== 'undefined' && normalized !== 'null';
+};
 
 // Request interceptor to add Authorization header
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('adminToken');
-    if (token) {
+    if (isUsableToken(token)) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else if (token) {
+      localStorage.removeItem('adminToken');
     }
     return config;
   },
@@ -59,7 +65,7 @@ api.interceptors.response.use(
     }
     if (error.response?.status === 401) {
       localStorage.removeItem('adminToken');
-      window.location.href = '/admin/login';
+      window.location.href = '/admin-no-all-call';
     }
     return Promise.reject(error);
   }

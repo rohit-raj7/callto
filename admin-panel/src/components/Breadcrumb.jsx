@@ -21,7 +21,7 @@ const Breadcrumb = () => {
   return (
     <nav className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400 mb-6">
       <Link 
-        to="/admin/dashboard" 
+        to="/admin-no-all-call/dashboard" 
         className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
       >
         <Home className="w-4 h-4" />

@@ -79,6 +79,11 @@ class AuthService {
           await _storage.saveIsListener(true);
           await _storage.saveListenerProfileComplete(true);
         }
+
+        // Mark user profile as complete if backend data indicates so
+        if (user.hasCompleteProfile) {
+          await _storage.saveUserProfileComplete(true);
+        }
       }
       
       return AuthResult(

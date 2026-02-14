@@ -4,14 +4,33 @@ import api from '../services/api.js';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, CheckCircle, XCircle, Loader2, AlertCircle, Sun, Moon } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 
+const extractAdminToken = (data = {}) =>
+  data?.token || data?.access_token || data?.accessToken || data?.jwt || null;
+
+const isUsableToken = (token) => {
+  const normalized = String(token || '').trim();
+  return Boolean(normalized) && normalized !== 'undefined' && normalized !== 'null';
+};
+
+const getApiErrorMessage = (err, fallbackMessage) => {
+  const apiMessage = err?.response?.data?.error || err?.response?.data?.message;
+  if (typeof apiMessage === 'string' && apiMessage.trim().length > 0) {
+    return apiMessage.trim();
+  }
+  return fallbackMessage;
+};
+
 const AdminLogin = () => {
   const navigate = useNavigate();
   const { isDark, toggleTheme } = useTheme();
+  const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
   // Redirect if already logged in
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
-    if (token) {
+    if (isUsableToken(token)) {
       navigate('/admin-no-all-call/dashboard');
+    } else if (token) {
+      localStorage.removeItem('adminToken');
     }
   }, [navigate]);
   const [formData, setFormData] = useState({
@@ -27,6 +46,7 @@ const AdminLogin = () => {
   const [newPassword, setNewPassword] = useState('');
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState(''); // 'success', 'error'
+  const [isGoogleConfigured, setIsGoogleConfigured] = useState(Boolean(googleClientId));
   // (removed duplicate navigate and useTheme declaration)
 
   // Validation functions
@@ -69,10 +89,14 @@ const AdminLogin = () => {
     setMessage('');
     try {
       const res = await api.post('/admin/login', formData);
-      localStorage.setItem('adminToken', res.data.token);
+      const token = extractAdminToken(res.data);
+      if (!isUsableToken(token)) {
+        throw new Error('Login response missing token');
+      }
+      localStorage.setItem('adminToken', token);
       navigate('/admin-no-all-call/dashboard');
     } catch (err) {
-      setMessage('Invalid email or password');
+      setMessage(getApiErrorMessage(err, 'Invalid email or password'));
       setMessageType('error');
     } finally {
       setLoading(false);
@@ -137,38 +161,75 @@ const AdminLogin = () => {
   };
 
   useEffect(() => {
+    if (!googleClientId) {
+      setIsGoogleConfigured(false);
+      return;
+    }
+
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.defer = true;
+    script.onerror = () => {
+      setIsGoogleConfigured(false);
+      setMessage('Failed to load Google Sign-In. Please use email login.');
+      setMessageType('error');
+    };
     document.body.appendChild(script);
 
     script.onload = () => {
-      window.google.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-        callback: handleGoogleResponse,
-      });
+      try {
+        const buttonContainer = document.getElementById('google-signin-button');
+        if (!window.google?.accounts?.id || !buttonContainer) {
+          throw new Error('Google Sign-In client not available');
+        }
 
-      window.google.accounts.id.renderButton(
-        document.getElementById('google-signin-button'),
-        { theme: 'filled_blue', size: 'large', width: 300 }
-      );
+        window.google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleResponse,
+        });
+
+        window.google.accounts.id.renderButton(buttonContainer, {
+          theme: 'filled_blue',
+          size: 'large',
+          width: 300,
+        });
+        setIsGoogleConfigured(true);
+      } catch (err) {
+        setIsGoogleConfigured(false);
+        setMessage('Google Sign-In is not available for this domain. Please use email login.');
+        setMessageType('error');
+      }
     };
 
-    return () => document.body.removeChild(script);
-  }, []);
+    return () => {
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
+  }, [googleClientId]);
 
   const handleGoogleResponse = async (response) => {
+    if (!response?.credential) {
+      setMessage('Google did not return a credential. Please try again.');
+      setMessageType('error');
+      return;
+    }
+
     setLoading(true);
     setMessage('');
     try {
       const res = await api.post('/admin/google-login', {
         token: response.credential,
       });
-      localStorage.setItem('adminToken', res.data.token);
+      const token = extractAdminToken(res.data);
+      if (!isUsableToken(token)) {
+        throw new Error('Google login response missing token');
+      }
+      localStorage.setItem('adminToken', token);
       navigate('/admin-no-all-call/dashboard');
     } catch (err) {
-      setMessage('Login failed. Please try again.');
+      setMessage(getApiErrorMessage(err, 'Login failed. Please try again.'));
       setMessageType('error');
     } finally {
       setLoading(false);
@@ -258,6 +319,7 @@ const AdminLogin = () => {
                     name="email"
                     value={formData.email}
                     onChange={handleInputChange}
+                    autoComplete="username"
                     className={`w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors dark:bg-gray-800 dark:text-white ${
                       errors.email ? 'border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-500' : 'border-gray-300 dark:border-gray-600'
                     }`}
@@ -285,6 +347,7 @@ const AdminLogin = () => {
                     name="password"
                     value={formData.password}
                     onChange={handleInputChange}
+                    autoComplete="current-password"
                     className={`w-full pl-10 pr-12 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-colors dark:bg-gray-800 dark:text-white ${
                       errors.password ? 'border-red-300 bg-red-50 dark:bg-red-900/20 dark:border-red-500' : 'border-gray-300 dark:border-gray-600'
                     }`}
@@ -352,6 +415,7 @@ const AdminLogin = () => {
                     type="email"
                     value={resetEmail}
                     onChange={(e) => setResetEmail(e.target.value)}
+                    autoComplete="email"
                     className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
                     placeholder="admin@callto.com"
                     disabled={loading}
@@ -396,6 +460,7 @@ const AdminLogin = () => {
                   type="text"
                   value={resetCode}
                   onChange={(e) => setResetCode(e.target.value)}
+                  autoComplete="one-time-code"
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="Enter 6-digit code"
                   disabled={loading}
@@ -410,6 +475,7 @@ const AdminLogin = () => {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
                   className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   placeholder="Enter new password"
                   disabled={loading}
@@ -443,7 +509,7 @@ const AdminLogin = () => {
           )}
 
           {/* Social Login Divider */}
-          {loginMode === 'login' && (
+          {loginMode === 'login' && isGoogleConfigured && (
             <>
               <div className="mt-8 mb-6">
                 <div className="relative">

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../actions/calling.dart';
+import '../nav/profile/wallet.dart';
 import '../../services/socket_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/call_service.dart';
@@ -225,12 +226,18 @@ class _RandomCallScreenState extends State<RandomCallScreen>
     );
 
     if (!callResult.success) {
+      final error = callResult.error ?? 'Failed to initiate call';
+      final isBalanceError = error.toLowerCase().contains('insufficient') ||
+          error.toLowerCase().contains('low balance');
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(callResult.error ?? 'Failed to initiate call'),
-          ),
-        );
+        if (isBalanceError) {
+          _showLowBalanceDialog(error);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(error)),
+          );
+        }
       }
       return;
     }
@@ -265,6 +272,29 @@ class _RandomCallScreenState extends State<RandomCallScreen>
           channelName: callId,
           listenerId: listenerId,
         ),
+      ),
+    );
+  }
+
+  /// Shows a professional low-balance bottom sheet with animated icon,
+  /// then navigates to the Wallet screen so the user can recharge.
+  void _showLowBalanceDialog(String errorMessage) {
+    showModalBottomSheet(
+      context: context,
+      isDismissible: true,
+      enableDrag: true,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => _LowBalanceSheet(
+        errorMessage: errorMessage,
+        onAddBalance: () {
+          Navigator.of(ctx).pop();
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const WalletScreen()),
+          );
+        },
+        onDismiss: () => Navigator.of(ctx).pop(),
       ),
     );
   }
@@ -914,6 +944,261 @@ class _RandomCallScreenState extends State<RandomCallScreen>
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Professional Low Balance Bottom Sheet
+// ══════════════════════════════════════════════════════════════════
+
+class _LowBalanceSheet extends StatefulWidget {
+  final String errorMessage;
+  final VoidCallback onAddBalance;
+  final VoidCallback onDismiss;
+
+  const _LowBalanceSheet({
+    required this.errorMessage,
+    required this.onAddBalance,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_LowBalanceSheet> createState() => _LowBalanceSheetState();
+}
+
+class _LowBalanceSheetState extends State<_LowBalanceSheet>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animCtrl;
+  late final Animation<double> _iconBounce;
+  late final Animation<double> _fadeSlide;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _iconBounce = CurvedAnimation(
+      parent: _animCtrl,
+      curve: const Interval(0.0, 0.6, curve: Curves.elasticOut),
+    );
+    _fadeSlide = CurvedAnimation(
+      parent: _animCtrl,
+      curve: const Interval(0.25, 1.0, curve: Curves.easeOut),
+    );
+    _animCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final bottomPad = MediaQuery.of(context).viewPadding.bottom;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: const BoxDecoration(
+        color: Color(0xFF111827),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(24, 14, 24, 20 + bottomPad),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Drag handle ──
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.18),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 22),
+
+            // ── Animated wallet icon ──
+            ScaleTransition(
+              scale: _iconBounce,
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.red.shade800.withOpacity(0.35),
+                      Colors.red.shade600.withOpacity(0.18),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  border: Border.all(
+                    color: Colors.redAccent.withOpacity(0.3),
+                    width: 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.redAccent.withOpacity(0.15),
+                      blurRadius: 24,
+                      spreadRadius: 4,
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  color: Colors.redAccent,
+                  size: 32,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+
+            // ── Title & subtitle ──
+            FadeTransition(
+              opacity: _fadeSlide,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.15),
+                  end: Offset.zero,
+                ).animate(_fadeSlide),
+                child: Column(
+                  children: [
+                    const Text(
+                      'Insufficient Balance',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade900.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.redAccent.withOpacity(0.15),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            color: Colors.redAccent.withOpacity(0.8),
+                            size: 18,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              widget.errorMessage,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 13.5,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Please recharge your wallet to continue making calls.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.5),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 26),
+
+            // ── Add Balance button ──
+            FadeTransition(
+              opacity: _fadeSlide,
+              child: SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFEC4899), Color(0xFF8B5CF6)],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFEC4899).withOpacity(0.3),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: widget.onAddBalance,
+                      borderRadius: BorderRadius.circular(14),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.add_circle_outline,
+                              color: Colors.white, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Add Balance',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // ── Maybe Later ──
+            FadeTransition(
+              opacity: _fadeSlide,
+              child: TextButton(
+                onPressed: widget.onDismiss,
+                style: TextButton.styleFrom(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                ),
+                child: Text(
+                  'Maybe Later',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.45),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
