@@ -23,9 +23,9 @@ class OfferBanner extends StatefulWidget {
 }
 
 class _OfferBannerState extends State<OfferBanner> {
-  /// Default Cloudinary video URL
-  static const String _defaultVideoUrl =
-      'https://player.cloudinary.com/embed/?cloud_name=dxxwkuqwc&public_id=WhatsApp_Video_2026-02-14_at_10.23.28_AM_mbp3g9';
+    /// Default Cloudinary video URL (direct .mp4 link)
+    static const String _defaultVideoUrl =
+      'https://res.cloudinary.com/dxxwkuqwc/video/upload/Z._Z_gjzaba.mp4';
 
   Timer? _ticker;
   Duration _remainingDuration = Duration.zero;
@@ -127,12 +127,20 @@ class _OfferBannerState extends State<OfferBanner> {
       return rawUrl;
     }
 
-    // Cloudinary embed player URL
+    // Cloudinary embed player URL (with query params)
     if (uri.host.contains('cloudinary.com')) {
+      // Try to extract from query parameters
       final cloudName = uri.queryParameters['cloud_name'];
       final publicId = uri.queryParameters['public_id'];
       if (cloudName != null && publicId != null) {
         return 'https://res.cloudinary.com/$cloudName/video/upload/$publicId.mp4';
+      }
+      // Try to extract from path (e.g. /embed/dxxwkuqwc/Z._Z_gjzaba)
+      final pathSegments = uri.pathSegments;
+      if (pathSegments.length >= 3 && pathSegments[0] == 'embed') {
+        final cloudNameFromPath = pathSegments[1];
+        final publicIdFromPath = pathSegments[2];
+        return 'https://res.cloudinary.com/$cloudNameFromPath/video/upload/$publicIdFromPath.mp4';
       }
     }
 
