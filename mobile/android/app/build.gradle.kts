@@ -5,6 +5,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val agoraNativeVersion = "4.5.2"
+
+configurations.configureEach {
+    resolutionStrategy.dependencySubstitution {
+        // Audio-focused app: avoid pulling the full Agora extension bundle.
+        substitute(module("io.agora.rtc:full-sdk"))
+            .using(module("io.agora.rtc:full-rtc-basic:$agoraNativeVersion"))
+    }
+
+    // Screen sharing is not used in the app and adds native payload.
+    exclude(group = "io.agora.rtc", module = "full-screen-sharing")
+}
+
 android {
     namespace = "com.callto.app"
     compileSdk = flutter.compileSdkVersion
@@ -30,17 +43,55 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        jniLibs {
+            // Compress native libs inside APK to reduce distributable APK size.
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf(
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/DEPENDENCIES",
+                "META-INF/*.kotlin_module",
+            )
+        }
+    }
+
+    if (project.hasProperty("split-per-abi")) {
+        // Keep split APKs to ARM architectures only.
+        splits {
+            abi {
+                isEnable = true
+                reset()
+                include("armeabi-v7a", "arm64-v8a")
+                isUniversalApk = false
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Required when R8 shrinks Flutter embedding classes referencing Play split install APIs.
+    implementation("com.google.android.play:core:1.10.3")
 }
 
 
